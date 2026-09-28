@@ -1490,7 +1490,11 @@
     '- rarm: 部位別筋肉量グラフの右腕 (kg)\n' +
     '- larm: 部位別筋肉量グラフの左腕 (kg)\n' +
     '- rleg: 部位別筋肉量グラフの右脚 (kg)\n' +
-    '- lleg: 部位別筋肉量グラフの左脚 (kg)';
+    '- lleg: 部位別筋肉量グラフの左脚 (kg)\n\n' +
+    '部位別筋肉量グラフの右腕・左腕・右脚・左脚を読み取る際は、各バーのすぐ近くに小さく印字されている' +
+    '"R"/"L"やRight/Leftなどの記号・文字を最優先で探し、それに従って割り当ててください。' +
+    'そのような記号が見当たらない場合のみ、グラフが人体を正面から見た配置（鏡のように左右が入れ替わる）である' +
+    '前提で判断してください。';
 
   const GEMINI_INBODY_SCHEMA = {
     type: 'OBJECT',
@@ -1699,17 +1703,14 @@
         { inline_data: { mime_type: mimeType, data: base64 } }
       ];
       const result = await callGeminiJSON(apiKey, parts, GEMINI_INBODY_SCHEMA);
-      // 部位別筋肉量のグラフは人体を正面から見た（鏡のような）配置で描かれており、
-      // 図には左右のテキストラベルが印字されていないため、AIが画像上の見た目の左右を
-      // そのまま「右腕/左腕」等に当てはめると実際とは逆になることが確認された。
-      // プロンプトの指示だけに頼らず、確実に正しくなるようここで入れ替える
-      const corrected = Object.assign({}, result, {
-        rarm: result.larm, larm: result.rarm,
-        rleg: result.lleg, lleg: result.rleg
-      });
-      const found = applyParsedMetrics(corrected);
+      // 部位別筋肉量（右腕/左腕/右脚/左脚）は、常に同じ向きにずれるとは限らず、
+      // 機械的な左右入れ替えでは直らないことが確認された（一定の法則がない）。
+      // 誤った値を自信満々に出すより、ここは要確認であることを明示する
+      const found = applyParsedMetrics(result);
+      const limbNote = '（部位別筋肉量の左右はAIでも読み違えることがあるため、必ず画像と見比べて確認してください。' +
+        '確実に入力したい場合は「1項目ずつ確実に読み取る」をご利用ください）';
       ocrStatus.textContent = found > 0
-        ? `AIによる読み取りが完了しました（${found}項目）。内容を確認・修正してください。`
+        ? `AIによる読み取りが完了しました（${found}項目）。内容を確認・修正してください。${limbNote}`
         : 'AIから項目を取得できませんでした。手動で入力するか、OCRやガイド付き入力をお試しください。';
     } catch (err) {
       console.error(err);
@@ -1927,12 +1928,13 @@
     }
 
     if (area === '腰' || area === '背中') {
+      const areaLabel = area; // 選択された部位に合わせて文言を出し分ける（腰 or 背中）
       addIf(d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25),
-        '体重に対して筋肉量（特に体幹を支える筋力）が少なめで、腰部への負担が増えやすい状態です。');
+        `体重に対して筋肉量（特に体幹を支える筋力）が少なめで、${areaLabel}への負担が増えやすい状態です。`);
       addIf(d.trunk !== null && d.weight !== null && (d.trunk / d.weight * 100) < (d.gender === 'male' ? 16 : 12),
-        `体幹（体を支える中心部）の筋肉量が体重に対して少なめ（目安）で、腰・背中を支える力が不足しやすい状態です。`);
+        `体幹（体を支える中心部）の筋肉量が体重に対して少なめ（目安）で、${areaLabel}を支える力が不足しやすい状態です。`);
       addIf(d.legAsym && d.legAsym.diffPct >= 1,
-        `脚の筋肉量に左右差（${d.legAsym.diffPct.toFixed(1)}%）があり、姿勢の傾きが腰への負担を生んでいる可能性があります。`);
+        `脚の筋肉量に左右差（${d.legAsym.diffPct.toFixed(1)}%）があり、姿勢の傾きが${areaLabel}への負担を生んでいる可能性があります。`);
       addIf(d.duration === 'chronic', '症状が慢性化しており、筋力低下や姿勢の崩れが積み重なっている可能性があります。');
     }
 
