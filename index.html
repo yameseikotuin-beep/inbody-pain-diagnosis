@@ -1699,7 +1699,15 @@
         { inline_data: { mime_type: mimeType, data: base64 } }
       ];
       const result = await callGeminiJSON(apiKey, parts, GEMINI_INBODY_SCHEMA);
-      const found = applyParsedMetrics(result);
+      // 部位別筋肉量のグラフは人体を正面から見た（鏡のような）配置で描かれており、
+      // 図には左右のテキストラベルが印字されていないため、AIが画像上の見た目の左右を
+      // そのまま「右腕/左腕」等に当てはめると実際とは逆になることが確認された。
+      // プロンプトの指示だけに頼らず、確実に正しくなるようここで入れ替える
+      const corrected = Object.assign({}, result, {
+        rarm: result.larm, larm: result.rarm,
+        rleg: result.lleg, lleg: result.rleg
+      });
+      const found = applyParsedMetrics(corrected);
       ocrStatus.textContent = found > 0
         ? `AIによる読み取りが完了しました（${found}項目）。内容を確認・修正してください。`
         : 'AIから項目を取得できませんでした。手動で入力するか、OCRやガイド付き入力をお試しください。';
