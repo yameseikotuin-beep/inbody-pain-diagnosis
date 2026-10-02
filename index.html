@@ -631,7 +631,24 @@
   <!-- STEP 3: 痛みの症状 -->
   <section class="panel">
     <h2><span class="step">3</span>痛みの症状</h2>
-    <p class="desc">現在気になる痛み・違和感のある部位を選択してください（複数選択可）。</p>
+
+    <p class="desc">主訴（該当するものをすべて選択）— 選ぶと、関連する詳しい問診項目が下に表示されます。</p>
+    <div class="chips" id="chiefComplaintChips">
+      <label class="chip"><input type="checkbox" value="腰痛"><span>腰痛</span></label>
+      <label class="chip"><input type="checkbox" value="肩こり"><span>肩こり</span></label>
+      <label class="chip"><input type="checkbox" value="肩関節痛"><span>肩関節痛</span></label>
+      <label class="chip"><input type="checkbox" value="首の痛み"><span>首の痛み</span></label>
+      <label class="chip"><input type="checkbox" value="頭痛"><span>頭痛</span></label>
+      <label class="chip"><input type="checkbox" value="膝の痛み"><span>膝の痛み</span></label>
+      <label class="chip"><input type="checkbox" value="股関節痛"><span>股関節痛</span></label>
+      <label class="chip"><input type="checkbox" value="背中の痛み"><span>背中の痛み</span></label>
+      <label class="chip"><input type="checkbox" value="手足のしびれ"><span>手足のしびれ</span></label>
+      <label class="chip"><input type="checkbox" value="その他"><span>その他</span></label>
+    </div>
+
+    <div id="symptomSpecificWrap"></div>
+
+    <p class="desc" style="margin-top:20px;">現在気になる痛み・違和感のある部位を選択してください（複数選択可）。こちらは下記の「関連要因分析」に使用されます。</p>
 
     <div class="chips" id="painChips">
       <label class="chip"><input type="checkbox" value="首"><span>首</span></label>
@@ -683,6 +700,30 @@
             <option value="other">その他</option>
           </select>
         </div>
+        <div class="field">
+          <label for="onsetTiming">症状の発生時期</label>
+          <input type="text" id="onsetTiming" placeholder="例: 2週間前から">
+        </div>
+        <div class="field">
+          <label for="painFrequency">痛みの頻度</label>
+          <select id="painFrequency">
+            <option value="">選択してください</option>
+            <option value="constant">常に痛む</option>
+            <option value="movement_only">動作時のみ</option>
+            <option value="sometimes">時々</option>
+            <option value="other">その他</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label>痛みが出る時間帯（複数選択可）</label>
+        <div class="chips" id="painTimeOfDayChips">
+          <label class="chip"><input type="checkbox" value="朝"><span>朝</span></label>
+          <label class="chip"><input type="checkbox" value="日中"><span>日中</span></label>
+          <label class="chip"><input type="checkbox" value="夕方"><span>夕方</span></label>
+          <label class="chip"><input type="checkbox" value="夜間"><span>夜間</span></label>
+          <label class="chip"><input type="checkbox" value="就寝中"><span>就寝中</span></label>
+        </div>
       </div>
       <div class="field" style="margin-top:12px;">
         <label for="aggravatingMovement">痛みが出る・強くなる動作や姿勢</label>
@@ -695,6 +736,10 @@
       <div class="field" style="margin-top:12px;">
         <label for="dailyImpact">日常生活への影響</label>
         <textarea id="dailyImpact" rows="2" placeholder="例: 長時間の立ち仕事がつらい"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="priorTreatment">過去の治療歴</label>
+        <textarea id="priorTreatment" rows="2" placeholder="例: 他院で電気治療を受けていた"></textarea>
       </div>
       <div class="field" style="margin-top:12px;">
         <label for="medicalHistory">既往歴・手術歴</label>
@@ -711,6 +756,14 @@
       <div class="field" style="margin-top:12px;">
         <label for="occupationInfo">職業・生活動作（デスクワーク、重量物を扱う等）</label>
         <textarea id="occupationInfo" rows="2" placeholder="例: デスクワーク中心、長時間同じ姿勢"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="perceivedCause">患者が自覚している原因</label>
+        <textarea id="perceivedCause" rows="2" placeholder="例: 姿勢が悪いからだと思う"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="improvementGoal">患者が改善したいこと</label>
+        <textarea id="improvementGoal" rows="2" placeholder="例: 朝起きた時の痛みをなくしたい"></textarea>
       </div>
     </details>
   </section>
@@ -1977,6 +2030,108 @@
   const intensityLabel = document.getElementById('intensityLabel');
   painIntensity.addEventListener('input', () => { intensityLabel.textContent = painIntensity.value; });
 
+  /* ---------- 症状別（主訴別）問診 ----------
+   * 主訴の選択に応じて問診項目を動的に切り替える。未選択の主訴に対応する項目は
+   * 表示・保存しない（未入力を推測で補完しない）。本リストにない主訴
+   * （背中の痛み／手足のしびれ／その他）は、共通問診のみを用いる
+   * （仕様に個別項目の指定がないため、独自に項目を創作しない） */
+  const SYMPTOM_QUESTIONNAIRE_CONFIG = {
+    '腰痛': [
+      {id:'flexion_pain', label:'前屈時の痛み'}, {id:'extension_pain', label:'後屈時の痛み'},
+      {id:'morning_pain', label:'起床時の痛み'}, {id:'sitting_pain', label:'長時間座った後の痛み'},
+      {id:'standing_pain', label:'長時間立った後の痛み'}, {id:'walking_pain', label:'歩行時の痛み'},
+      {id:'turning_pain', label:'寝返り時の痛み'}, {id:'radiating_pain', label:'下肢への放散痛'},
+      {id:'leg_numbness', label:'下肢のしびれ'}, {id:'cough_worsens', label:'咳・くしゃみでの増悪'}
+    ],
+    '肩こり': [
+      {id:'neck_move_pain', label:'首を動かした際の痛み'}, {id:'arm_raise_pain', label:'腕を上げた際の痛み'},
+      {id:'arm_back_pain', label:'腕を後ろに回した際の痛み'}, {id:'desk_work_worse', label:'長時間のデスクワークによる増悪'},
+      {id:'sleep_symptom', label:'睡眠中・起床時の症状'}, {id:'scapula_tightness', label:'肩甲骨周辺の張り'},
+      {id:'arm_numbness', label:'腕や手へのしびれ'}, {id:'side_diff', label:'左右差'}
+    ],
+    '肩関節痛': [
+      {id:'neck_move_pain', label:'首を動かした際の痛み'}, {id:'arm_raise_pain', label:'腕を上げた際の痛み'},
+      {id:'arm_back_pain', label:'腕を後ろに回した際の痛み'}, {id:'desk_work_worse', label:'長時間のデスクワークによる増悪'},
+      {id:'sleep_symptom', label:'睡眠中・起床時の症状'}, {id:'scapula_tightness', label:'肩甲骨周辺の張り'},
+      {id:'arm_numbness', label:'腕や手へのしびれ'}, {id:'side_diff', label:'左右差'}
+    ],
+    '首の痛み': [
+      {id:'look_up_pain', label:'上を向く動作'}, {id:'look_down_pain', label:'下を向く動作'},
+      {id:'turn_side_pain', label:'左右を向く動作'}, {id:'phone_pc_use', label:'長時間のスマートフォン・PC使用'},
+      {id:'morning_symptom', label:'起床時の症状'}, {id:'headache_concurrent', label:'頭痛の併発'},
+      {id:'arm_hand_numbness', label:'腕や手へのしびれ'}
+    ],
+    '頭痛': [
+      {id:'frequency', label:'発生頻度', type:'text'}, {id:'location', label:'発生部位', type:'text'},
+      {id:'quality', label:'痛みの性質', type:'text'}, {id:'duration', label:'持続時間', type:'text'},
+      {id:'neck_shoulder_related', label:'首・肩こりとの関連'}, {id:'photophobia_phonophobia', label:'光・音への過敏'},
+      {id:'nausea', label:'吐き気の有無'}, {id:'sudden_onset', label:'突然発症かどうか'},
+      {id:'worst_ever', label:'今までにない強い頭痛かどうか'}
+    ],
+    '膝の痛み': [
+      {id:'walking', label:'歩行時'}, {id:'stairs', label:'階段昇降時'}, {id:'standing_up', label:'立ち上がり時'},
+      {id:'squatting', label:'しゃがみ込み時'}, {id:'seiza', label:'正座時'}, {id:'swelling', label:'膝の腫れ'},
+      {id:'instability', label:'膝崩れ・不安定感'}, {id:'side_diff', label:'左右差'}
+    ],
+    '股関節痛': [
+      {id:'walking', label:'歩行時'}, {id:'standing_up', label:'立ち上がり時'}, {id:'flexion', label:'股関節を曲げた際'},
+      {id:'abduction', label:'股関節を開いた際'}, {id:'socks_shoes', label:'靴下・靴の着脱'},
+      {id:'side_diff', label:'左右差'}, {id:'rom_limit', label:'可動域の制限'}
+    ]
+  };
+
+  const chiefComplaintChips = document.getElementById('chiefComplaintChips');
+  const symptomSpecificWrap = document.getElementById('symptomSpecificWrap');
+
+  // 主訴切り替え時も、既に入力した回答は保持する（DOM上の値をキャッシュに退避してから再構築する）
+  let symptomAnswersCache = {};
+  function cacheSymptomAnswers(){
+    symptomSpecificWrap.querySelectorAll('[data-symptom-field]').forEach(el => {
+      symptomAnswersCache[el.dataset.symptomField] = el.value;
+    });
+  }
+  function renderSymptomSpecificPanels(){
+    cacheSymptomAnswers();
+    const selected = Array.from(chiefComplaintChips.querySelectorAll('input:checked')).map(c => c.value);
+    symptomSpecificWrap.innerHTML = selected
+      .filter(cat => SYMPTOM_QUESTIONNAIRE_CONFIG[cat])
+      .map(cat => {
+        const items = SYMPTOM_QUESTIONNAIRE_CONFIG[cat].map(item => {
+          const fieldKey = `${cat}::${item.id}`;
+          const cached = symptomAnswersCache[fieldKey] || '';
+          if (item.type === 'text') {
+            return `<div class="field"><label>${item.label}</label>
+              <input type="text" data-symptom-field="${fieldKey}" value="${cached.replace(/"/g, '&quot;')}"></div>`;
+          }
+          return `<div class="field"><label>${item.label}</label>
+            <select data-symptom-field="${fieldKey}">
+              <option value="" ${cached === '' ? 'selected' : ''}>未評価</option>
+              <option value="あり" ${cached === 'あり' ? 'selected' : ''}>あり</option>
+              <option value="なし" ${cached === 'なし' ? 'selected' : ''}>なし</option>
+            </select></div>`;
+        }).join('');
+        return `<fieldset style="margin-top:12px;"><legend>${cat}の詳しい問診</legend><div class="grid">${items}</div></fieldset>`;
+      }).join('');
+  }
+  chiefComplaintChips.addEventListener('change', renderSymptomSpecificPanels);
+
+  function collectSymptomSpecificAnswers(){
+    cacheSymptomAnswers();
+    const selected = Array.from(chiefComplaintChips.querySelectorAll('input:checked')).map(c => c.value);
+    const result = {};
+    selected.forEach(cat => {
+      const config = SYMPTOM_QUESTIONNAIRE_CONFIG[cat];
+      if (!config) return; // 項目未定義の主訴（背中の痛み等）は共通問診のみのため何も追加しない
+      const answers = {};
+      config.forEach(item => {
+        const v = symptomAnswersCache[`${cat}::${item.id}`];
+        if (v) answers[item.id] = v; // 未入力（空）は保存しない
+      });
+      if (Object.keys(answers).length > 0) result[cat] = answers;
+    });
+    return result;
+  }
+
   /* ---------- Step 4: diagnosis ---------- */
   const diagnoseBtn = document.getElementById('diagnoseBtn');
   diagnoseBtn.addEventListener('click', runDiagnosis);
@@ -2091,19 +2246,28 @@
     const intensity = parseInt(painIntensity.value, 10);
     const duration = document.getElementById('painDuration').value;
     const redFlags = Array.from(document.querySelectorAll('#redFlagChips input:checked')).map(c => c.value);
+    const chiefComplaintCategories = Array.from(chiefComplaintChips.querySelectorAll('input:checked')).map(c => c.value);
+    const painTimeOfDay = Array.from(document.querySelectorAll('#painTimeOfDayChips input:checked')).map(c => c.value);
 
     // ---- 詳しい問診（任意入力）。評価には使わず、施術者向けレポートにそのまま記載する ----
     const intake = {
       chiefComplaint: document.getElementById('chiefComplaint').value.trim(),
       onsetTrigger: document.getElementById('onsetTrigger').value,
+      onsetTiming: document.getElementById('onsetTiming').value.trim(),
+      painFrequency: document.getElementById('painFrequency').value,
+      painTimeOfDay,
       aggravatingMovement: document.getElementById('aggravatingMovement').value.trim(),
       relievingFactor: document.getElementById('relievingFactor').value.trim(),
       dailyImpact: document.getElementById('dailyImpact').value.trim(),
+      priorTreatment: document.getElementById('priorTreatment').value.trim(),
       medicalHistory: document.getElementById('medicalHistory').value.trim(),
       medicationInfo: document.getElementById('medicationInfo').value.trim(),
       exerciseHabit: document.getElementById('exerciseHabit').value.trim(),
-      occupationInfo: document.getElementById('occupationInfo').value.trim()
+      occupationInfo: document.getElementById('occupationInfo').value.trim(),
+      perceivedCause: document.getElementById('perceivedCause').value.trim(),
+      improvementGoal: document.getElementById('improvementGoal').value.trim()
     };
+    const symptomSpecific = collectSymptomSpecificAnswers();
 
     // ---- metric evaluations ----
     const evals = [
@@ -2197,20 +2361,39 @@
     // ---- 問診内容（評価には使わず、入力内容をそのまま記載） ----
     const intakeWrap = document.getElementById('intakeWrap');
     const ONSET_LABELS = {trauma:'外傷・事故', movement:'特定の動作', gradual:'徐々に（きっかけ不明）', other:'その他'};
+    const FREQ_LABELS = {constant:'常に痛む', movement_only:'動作時のみ', sometimes:'時々', other:'その他'};
     const intakeRows = [
-      ['主訴', intake.chiefComplaint],
+      ['主訴（カテゴリ）', chiefComplaintCategories.join('、')],
+      ['主訴（自由記述）', intake.chiefComplaint],
       ['発症のきっかけ', ONSET_LABELS[intake.onsetTrigger] || ''],
+      ['症状の発生時期', intake.onsetTiming],
+      ['痛みの頻度', FREQ_LABELS[intake.painFrequency] || ''],
+      ['痛みが出る時間帯', intake.painTimeOfDay.join('、')],
       ['痛みが出る・強くなる動作や姿勢', intake.aggravatingMovement],
       ['痛みが軽減する条件', intake.relievingFactor],
       ['日常生活への影響', intake.dailyImpact],
+      ['過去の治療歴', intake.priorTreatment],
       ['既往歴・手術歴', intake.medicalHistory],
       ['服薬情報', intake.medicationInfo],
       ['運動習慣', intake.exerciseHabit],
-      ['職業・生活動作', intake.occupationInfo]
+      ['職業・生活動作', intake.occupationInfo],
+      ['患者が自覚している原因', intake.perceivedCause],
+      ['患者が改善したいこと', intake.improvementGoal]
     ].filter(([, v]) => v);
-    intakeWrap.innerHTML = intakeRows.length
+    let intakeHtml = intakeRows.length
       ? `<ul>${intakeRows.map(([k, v]) => `<li><strong>${k}：</strong>${v}</li>`).join('')}</ul>`
       : '<p class="desc">詳しい問診は入力されていません（任意項目です）。</p>';
+    const symptomCats = Object.keys(symptomSpecific);
+    if (symptomCats.length > 0) {
+      intakeHtml += symptomCats.map(cat => {
+        const config = SYMPTOM_QUESTIONNAIRE_CONFIG[cat];
+        const labelFor = id => (config.find(i => i.id === id) || {}).label || id;
+        const items = Object.entries(symptomSpecific[cat])
+          .map(([id, v]) => `<li>${labelFor(id)}：${v}</li>`).join('');
+        return `<h4 style="font-size:.85rem;margin:10px 0 4px;">${cat}の詳しい問診</h4><ul>${items}</ul>`;
+      }).join('');
+    }
+    intakeWrap.innerHTML = intakeHtml;
 
     // ---- cause analysis per pain area ----
     const causeData = {
@@ -2992,6 +3175,7 @@
     let patient = await PatientRepo.findByName(name);
     if (!patient) patient = await PatientRepo.create(name);
     const painAreas = Array.from(document.querySelectorAll('#painChips input:checked')).map(c => c.value);
+    const chiefComplaintCategoriesForSave = Array.from(chiefComplaintChips.querySelectorAll('input:checked')).map(c => c.value);
     await VisitRepo.create(patient.id, {
       date: new Date().toISOString(),
       rulesetVersion: RULESET_VERSION,
@@ -2999,7 +3183,11 @@
         weight: num('f_weight'), bmi: num('f_bmi'), pbf: num('f_pbf'), fatmass: num('f_fatmass'),
         smm: num('f_smm'), visceral: num('f_visceral'), muscle: num('f_muscle')
       },
-      questionnaire: { painAreas, intensity: parseInt(painIntensity.value, 10), duration: document.getElementById('painDuration').value }
+      questionnaire: {
+        painAreas, intensity: parseInt(painIntensity.value, 10), duration: document.getElementById('painDuration').value,
+        chiefComplaintCategories: chiefComplaintCategoriesForSave,
+        symptomSpecific: collectSymptomSpecificAnswers()
+      }
     });
     const count = (await VisitRepo.listByPatient(patient.id)).length;
     await AuditRepo.append('save', name, `1件保存（合計${count}件）`);
