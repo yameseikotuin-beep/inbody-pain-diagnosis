@@ -268,6 +268,19 @@
   .risk-warning{background:var(--warning-bg);color:var(--warning);}
   .risk-danger{background:var(--danger-bg);color:var(--danger);}
 
+  .redflag-banner{
+    background:var(--danger-bg);
+    border:2px solid var(--danger);
+    color:var(--danger);
+    border-radius:8px;
+    padding:14px 16px;
+    margin-bottom:16px;
+    font-weight:600;
+    font-size:.9rem;
+  }
+  .redflag-banner p{margin:6px 0 0;font-weight:400;}
+  .redflag-banner ul{margin:6px 0 0;padding-left:20px;font-weight:400;}
+
   .table-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:14px;}
   table#metricsTable{width:100%;min-width:480px;border-collapse:collapse;font-size:.85rem;}
   table#metricsTable th, table#metricsTable td{
@@ -315,7 +328,10 @@
   .cause-card h4{margin:0 0 8px;font-size:.95rem;}
   .cause-card ul{margin:0;padding-left:18px;font-size:.85rem;}
   .cause-card ul li{margin-bottom:6px;}
-  .cause-card .none{color:var(--muted);font-size:.85rem;}
+  .cause-card .none{color:var(--muted);font-size:.85rem;margin:0;}
+  .finding-section{margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);}
+  .finding-section:first-of-type{margin-top:10px;padding-top:0;border-top:none;}
+  .finding-section h5{margin:0 0 6px;font-size:.78rem;color:var(--muted);font-weight:600;}
 
   .rec-list{font-size:.85rem;padding-left:18px;}
   .rec-list li{margin-bottom:6px;}
@@ -547,12 +563,29 @@
     </div>
   </section>
 
+  <!-- STEP 4: 危険信号チェック -->
+  <section class="panel">
+    <h2><span class="step">4</span>危険信号チェック</h2>
+    <p class="desc">以下に当てはまる項目がある場合、体組成データの内容にかかわらず医療機関への受診を優先してください。該当するものをすべて選択してください。</p>
+    <div class="chips" id="redFlagChips">
+      <label class="chip"><input type="checkbox" value="numbness"><span>しびれ・感覚の異常がある</span></label>
+      <label class="chip"><input type="checkbox" value="weakness"><span>力が入りにくい（筋力低下）</span></label>
+      <label class="chip"><input type="checkbox" value="bladder"><span>排尿・排便のコントロールが難しい</span></label>
+      <label class="chip"><input type="checkbox" value="nightpain"><span>安静時・夜間でも強く痛む</span></label>
+      <label class="chip"><input type="checkbox" value="weightloss"><span>原因不明の体重減少がある</span></label>
+      <label class="chip"><input type="checkbox" value="fever"><span>発熱を伴っている</span></label>
+      <label class="chip"><input type="checkbox" value="trauma"><span>転倒・事故など外傷の後に発症した</span></label>
+      <label class="chip"><input type="checkbox" value="cancerhx"><span>がんの既往がある</span></label>
+    </div>
+  </section>
+
   <button id="diagnoseBtn">この内容で診断する</button>
 
   <!-- RESULTS -->
   <section class="panel" id="results">
     <h2>診断結果</h2>
 
+    <div id="redFlagBanner"></div>
     <div id="riskBadgeWrap"></div>
 
     <h3 style="margin-top:20px;font-size:.95rem;">計測値の評価</h3>
@@ -1808,6 +1841,7 @@
     const side = document.querySelector('input[name="side"]:checked').value;
     const intensity = parseInt(painIntensity.value, 10);
     const duration = document.getElementById('painDuration').value;
+    const redFlags = Array.from(document.querySelectorAll('#redFlagChips input:checked')).map(c => c.value);
 
     // ---- metric evaluations ----
     const evals = [
@@ -1824,6 +1858,23 @@
       if (e.result && riskRank(e.result.level) > riskRank(worst)) worst = e.result.level;
     });
     if (intensity >= 7 && riskRank(worst) < riskRank('warning')) worst = 'warning';
+
+    // ---- 危険信号バナー ----
+    // 体組成データの評価結果とは独立に、該当があれば常に最優先で表示する。
+    // ここはAIによる判断ではなく、該当項目の有無による機械的な表示
+    const REDFLAG_LABELS = {
+      numbness: 'しびれ・感覚の異常', weakness: '力が入りにくい（筋力低下）',
+      bladder: '排尿・排便のコントロール困難', nightpain: '安静時・夜間の強い痛み',
+      weightloss: '原因不明の体重減少', fever: '発熱', trauma: '外傷後の発症', cancerhx: 'がんの既往'
+    };
+    const redFlagBanner = document.getElementById('redFlagBanner');
+    if (redFlags.length > 0) {
+      const items = redFlags.map(f => `<li>${REDFLAG_LABELS[f] || f}</li>`).join('');
+      redFlagBanner.innerHTML = `<div class="redflag-banner">⚠ 医療機関への受診を優先してください<ul>${items}</ul>` +
+        `<p>該当する項目は、体組成データの評価結果にかかわらず、医療機関での確認が必要とされる症状です。このアプリの他の評価結果は参考情報としてご覧いただき、施術よりも先に医療機関への相談をおすすめします。</p></div>`;
+    } else {
+      redFlagBanner.innerHTML = '';
+    }
 
     // ---- render metrics table ----
     const tbody = document.getElementById('metricsTbody');
@@ -1909,106 +1960,154 @@
     return div;
   }
 
+  // C区分：InBodyのデータだけでは判断できず、追加で確認が必要な評価項目（部位別）。
+  // ここに挙げるのは「確認すべき項目」の提示であり、AIによる自動評価ではない
+  // （実施・判断は施術者が行う）
+  const ADDITIONAL_ASSESSMENT_ITEMS = {
+    '腰':      ['骨盤・脊柱の可動性', '股関節の可動域', '歩行・立ち座り動作', 'しびれ・筋力低下など神経症状の有無'],
+    '背中':    ['胸椎・肩甲骨の可動性', '姿勢（猫背・反り腰の程度）', '呼吸時の胸郭の動き'],
+    '股関節':  ['股関節の可動域', '歩行', '片脚立位での安定性', '荷重時の症状', '骨盤と下肢の連動動作'],
+    '膝':      ['膝関節の可動域', '歩行・階段昇降', '立ち座り動作', '下肢アライメント（O脚・X脚等）', '外傷歴・既往歴'],
+    '肩':      ['肩関節の可動域', '肩甲骨の動き', '頸椎・胸椎の可動性', '頭部・頸部の姿勢', '日常生活・作業環境'],
+    '首':      ['頸椎の可動性', '頭部前方位の程度', '肩甲骨・胸椎の動き', '日常生活・作業環境（スマホ・PC姿勢等）'],
+    '足首・足': ['足関節の可動域', '歩行時の足部の使い方', '立位時の足部アライメント（扁平足等）', '外傷歴'],
+    '肘':      ['肘関節の可動域', '前腕・手首の使い方（反復動作の有無）', '外傷歴'],
+    '手首・手': ['手関節の可動域', '反復動作・作業内容', '外傷歴・しびれの有無']
+  };
+
+  const UNKNOWN_DISCLAIMER = 'InBodyの体組成データだけでは、特定の筋肉・関節・神経の機能異常や、構造的な疾患（椎間板ヘルニア、関節症など）の有無は判断できません。痛みの原因の特定には、問診・視診・触診・徒手検査などの身体評価が必要です。';
+
   function renderCauseCard(area, d){
-    const reasons = [];
+    const factsA = [];   // A: 客観的に確認できた身体組成の特徴（測定値そのもの）
+    const mechB = [];    // B: 痛みとの関連が一般的に指摘される機序（個別の因果関係ではない）
 
-    const addIf = (cond, text) => { if (cond) reasons.push(text); };
+    const addA = (cond, text) => { if (cond) factsA.push(text); };
+    const addB = (cond, text) => { if (cond) mechB.push(text); };
 
-    // 共通：体脂肪率が高いことによる代謝的な影響（脂肪組織はエネルギー貯蔵庫であるだけでなく、
-    // サイトカインやアディポカインなどを分泌する代謝活性のある組織でもある）。
-    // 特定の関節に限らず全身の痛みの感受性に関与しうるため、部位を問わず共通で判定する
+    // 共通：体脂肪率（脂肪組織は貯蔵庫であるだけでなく、サイトカイン等を分泌する
+    // 代謝活性のある組織でもある、という一般的な生理学的機序。部位を問わず判定）
     const pbfHighThreshold = d.gender === 'male' ? 25 : 33;
-    addIf(d.pbf !== null && d.pbf >= pbfHighThreshold,
-      '体脂肪率が高く、脂肪組織から分泌される炎症性サイトカインなどの代謝的な影響により、炎症や痛みを感じやすい状態（痛覚過敏）に関与している可能性があります。');
+    addA(d.pbf !== null && d.pbf >= pbfHighThreshold,
+      `体脂肪率が${d.pbf}%で、基準（${pbfHighThreshold}%以上）より高めです。`);
+    addB(d.pbf !== null && d.pbf >= pbfHighThreshold,
+      '体脂肪率の高さは、脂肪組織から分泌される炎症性サイトカインなどを介して痛みの感受性（痛覚過敏）に関与する可能性が機序として指摘されています。これは一般的な生理学的関連であり、本人の痛みの原因であると確定するものではありません。');
 
-    // 共通：内臓脂肪レベルが高いことによる全身の代謝負担（特定の部位に限らず判定する）
-    addIf(d.visceral !== null && d.visceral >= 7,
-      '内臓脂肪レベルが高めで、全身の代謝負担が姿勢維持筋への負担につながっている可能性があります。');
+    // 共通：内臓脂肪レベル
+    addA(d.visceral !== null && d.visceral >= 7, `内臓脂肪レベルが${d.visceral}で、基準（7以上）よりやや高めです。`);
+    addB(d.visceral !== null && d.visceral >= 7,
+      '内臓脂肪レベルの高さは、全身の代謝負担の増加を介して姿勢維持筋への負担につながる可能性が指摘されていますが、個別の症状の原因と確定するものではありません。');
 
-    // 共通：肥満による関節負荷
+    // 共通：BMI（体重による関節への物理的負荷）
     if (['腰','膝','股関節'].includes(area)) {
-      addIf(d.bmi !== null && d.bmi >= 25, 'BMIが高く、体重による関節・腰部への負荷が増加している可能性があります。');
+      addA(d.bmi !== null && d.bmi >= 25, `BMIが${d.bmi}で、基準（25以上）より高めです。`);
+      addB(d.bmi !== null && d.bmi >= 25,
+        'BMIの高さは、体重による関節への物理的負荷の増加という機序が一般的に指摘されていますが、個別の痛みの原因と確定するものではありません。');
     }
 
     if (area === '腰' || area === '背中') {
       const areaLabel = area; // 選択された部位に合わせて文言を出し分ける（腰 or 背中）
-      addIf(d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25),
-        `体重に対して筋肉量（特に体幹を支える筋力）が少なめで、${areaLabel}への負担が増えやすい状態です。`);
-      addIf(d.trunk !== null && d.weight !== null && (d.trunk / d.weight * 100) < (d.gender === 'male' ? 16 : 12),
-        `体幹（体を支える中心部）の筋肉量が体重に対して少なめ（目安）で、${areaLabel}を支える力が不足しやすい状態です。`);
+      const smmLow = d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25);
+      addA(smmLow, '骨格筋量が体重に対して少なめです（目安基準を下回っています）。');
+      addB(smmLow, `体重に対する筋肉量の少なさは、体幹を支える筋力の不足を介して${areaLabel}への負担増加につながる可能性が指摘されていますが、確定的な原因ではありません。`);
+
+      const trunkLow = d.trunk !== null && d.weight !== null && (d.trunk / d.weight * 100) < (d.gender === 'male' ? 16 : 12);
+      addA(trunkLow, '体幹（体を支える中心部）の筋肉量が体重に対して少なめです（目安基準を下回っています）。');
+      addB(trunkLow, `体幹筋肉量の少なさは、体を支える力の不足を介して${areaLabel}への負担につながる可能性が指摘されていますが、確定的な原因ではありません。`);
+
       if (d.legAsym && d.legAsym.diffPct >= 1) {
-        reasons.push(`脚の筋肉量に左右差（${d.legAsym.diffPct.toFixed(1)}%）があり、姿勢の傾きが${areaLabel}への負担を生んでいる可能性があります。`);
+        addA(true, `脚の筋肉量に左右差（${d.legAsym.diffPct.toFixed(1)}%）があります。`);
+        addB(true, `左右差による姿勢の傾きが${areaLabel}への負担につながる可能性が指摘されていますが、確定的な原因ではありません。`);
       }
-      addIf(d.duration === 'chronic', '症状が慢性化しており、筋力低下や姿勢の崩れが積み重なっている可能性があります。');
+      addB(d.duration === 'chronic', '症状の慢性化が続くと、筋力低下や姿勢の崩れが積み重なる可能性が一般的に指摘されています。');
     }
 
     if (area === '膝') {
       if (d.legAsym && d.legAsym.diffPct >= 1) {
-        reasons.push(`左右の脚の筋肉量差（${d.legAsym.diffPct.toFixed(1)}%）があり、弱い側の膝に負担が集中している可能性があります。`);
+        addA(true, `脚の筋肉量に左右差（${d.legAsym.diffPct.toFixed(1)}%）があります。`);
+        addB(true, '左右差がある場合、弱い側の脚に負担が集中し膝への負担につながる可能性が指摘されていますが、確定的な原因ではありません。');
       }
-      addIf(d.bmi !== null && d.bmi >= 25, '体重増加により膝関節にかかる負荷が大きくなっている可能性があります。');
-      addIf(d.visceral !== null && d.visceral >= 7,
-        '内臓脂肪レベルが高く、腹部の重みで骨盤が前傾しやすい状態です。それに伴い「反り腰→股関節の内旋→O脚への変位」という連鎖が生じやすく、膝への負担が増加している可能性があります。');
+      addB(d.bmi !== null && d.bmi >= 25, '体重増加により膝関節にかかる負荷が大きくなる可能性が指摘されていますが、確定的な原因ではありません。');
+      addB(d.visceral !== null && d.visceral >= 7,
+        '内臓脂肪レベルの高さは、腹部の重みによる骨盤前傾→反り腰→股関節内旋→O脚への変位という姿勢的な連鎖を介して膝への負担増加につながる可能性が仮説として指摘されていますが、個別に確認されたものではなく、確定的な原因ではありません。');
     }
 
     if (area === '股関節') {
       if (d.legAsym && d.legAsym.diffPct >= 1) {
-        reasons.push(`脚の筋肉バランスの左右差（${d.legAsym.diffPct.toFixed(1)}%）が骨盤の傾きや股関節への偏った負荷につながっている可能性があります。`);
+        addA(true, `脚の筋肉バランスに左右差（${d.legAsym.diffPct.toFixed(1)}%）があります。`);
+        addB(true, '左右差が骨盤の傾きや股関節への偏った負荷につながる可能性が指摘されていますが、確定的な原因ではありません。');
       }
-      addIf(d.trunk !== null && d.weight !== null && (d.trunk / d.weight * 100) < (d.gender === 'male' ? 16 : 12),
-        `体幹の筋肉量が体重に対して少なめ（目安）で、骨盤・股関節まわりの安定性が低下しやすい状態です。`);
+      const trunkLow = d.trunk !== null && d.weight !== null && (d.trunk / d.weight * 100) < (d.gender === 'male' ? 16 : 12);
+      addA(trunkLow, '体幹の筋肉量が体重に対して少なめです（目安基準を下回っています）。');
+      addB(trunkLow, '体幹筋肉量の少なさが骨盤・股関節まわりの安定性低下につながる可能性が指摘されていますが、確定的な原因ではありません。');
     }
 
     if (area === '肩' || area === '首') {
       if (d.armAsym && d.armAsym.diffPct >= 1) {
-        reasons.push(`腕の筋肉量に左右差（${d.armAsym.diffPct.toFixed(1)}%）があり、姿勢の左右非対称性や肩こりの一因となっている可能性があります。`);
+        addA(true, `腕の筋肉量に左右差（${d.armAsym.diffPct.toFixed(1)}%）があります。`);
+        addB(true, '腕の筋肉量の左右差が姿勢の左右非対称性や肩こりの一因となる可能性が指摘されていますが、確定的な原因ではありません。');
       }
-      addIf(d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25),
-        '上半身を支える筋肉量が少なめで、長時間の姿勢保持による肩・首への負担が生じやすい状態です。');
+      const smmLow = d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25);
+      addA(smmLow, '骨格筋量が体重に対して少なめです（目安基準を下回っています）。');
+      addB(smmLow, '上半身を支える筋肉量の少なさが、長時間の姿勢保持による肩・首への負担につながる可能性が指摘されていますが、確定的な原因ではありません。');
     }
 
     if (area === '首') {
-      addIf(d.visceral !== null && d.visceral >= 7,
-        '内臓脂肪レベルが高く、腹部の重みで骨盤が前傾しやすい状態です。それに伴い「腰椎の過前弯（反り腰）→胸椎の過後弯（猫背）→頭部が前方に突出する姿勢」という連鎖が生じやすく、頸部への負担が増加している可能性があります。');
+      addB(d.visceral !== null && d.visceral >= 7,
+        '内臓脂肪レベルの高さは、腹部の重みによる骨盤前傾→反り腰→猫背→頭部前方突出という姿勢的な連鎖を介して頸部への負担増加につながる可能性が仮説として指摘されていますが、個別に確認されたものではなく、確定的な原因ではありません。');
     }
 
     if (area === '肩') {
-      addIf(d.visceral !== null && d.visceral >= 7,
-        '内臓脂肪レベルが高く、腹部の重みで骨盤が前傾しやすい状態です。それに伴い「腰椎の過前弯（反り腰）→胸椎の過後弯（猫背）→巻き肩」という連鎖が生じやすく、肩こりにつながっている可能性があります。');
+      addB(d.visceral !== null && d.visceral >= 7,
+        '内臓脂肪レベルの高さは、腹部の重みによる骨盤前傾→反り腰→猫背→巻き肩という姿勢的な連鎖を介して肩こりにつながる可能性が仮説として指摘されていますが、個別に確認されたものではなく、確定的な原因ではありません。');
     }
 
     if (area === '足首・足') {
-      addIf(d.bmi !== null && d.bmi >= 25, '体重増加により足首・足部にかかる負荷が大きくなっている可能性があります。');
-      addIf(d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25),
-        '体重に対して脚を支える筋肉量が少なめで、足首・足部への負担が増えやすい状態です。');
+      addB(d.bmi !== null && d.bmi >= 25, '体重増加により足首・足部にかかる負荷が大きくなる可能性が指摘されていますが、確定的な原因ではありません。');
+      const smmLow = d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25);
+      addA(smmLow, '骨格筋量が体重に対して少なめです（目安基準を下回っています）。');
+      addB(smmLow, '体重に対して脚を支える筋肉量が少ないと、足首・足部への負担が増えやすい可能性が指摘されていますが、確定的な原因ではありません。');
       if (d.legAsym && d.legAsym.diffPct >= 1) {
-        reasons.push(`脚の筋肉量の左右差（${d.legAsym.diffPct.toFixed(1)}%）により、片側の足首に負担が偏っている可能性があります。`);
+        addA(true, `脚の筋肉量に左右差（${d.legAsym.diffPct.toFixed(1)}%）があります。`);
+        addB(true, '左右差により片側の足首に負担が偏る可能性が指摘されていますが、確定的な原因ではありません。');
       }
     }
 
     if (area === '肘') {
       if (d.armAsym && d.armAsym.diffPct >= 1) {
-        reasons.push(`腕の筋肉量の左右差（${d.armAsym.diffPct.toFixed(1)}%）があり、利き手側などへの負担偏在が考えられます。`);
+        addA(true, `腕の筋肉量に左右差（${d.armAsym.diffPct.toFixed(1)}%）があります。`);
+        addB(true, '利き手側などへの負担偏在が考えられますが、確定的な原因ではありません。');
       }
     }
 
     if (area === '手首・手') {
-      addIf(d.bmi !== null && d.bmi >= 25, '体重増加により手首・手にかかる負荷が大きくなっている可能性があります。');
-      addIf(d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25),
-        '体重に対して腕を支える筋肉量が少なめで、手首・手への負担が増えやすい状態です。');
+      addB(d.bmi !== null && d.bmi >= 25, '体重増加により手首・手にかかる負荷が大きくなる可能性が指摘されていますが、確定的な原因ではありません。');
+      const smmLow = d.smm !== null && d.weight !== null && (d.smm / d.weight * 100) < (d.gender === 'male' ? 33 : 25);
+      addA(smmLow, '骨格筋量が体重に対して少なめです（目安基準を下回っています）。');
+      addB(smmLow, '体重に対して腕を支える筋肉量が少ないと、手首・手への負担が増えやすい可能性が指摘されていますが、確定的な原因ではありません。');
       if (d.armAsym && d.armAsym.diffPct >= 1) {
-        reasons.push(`腕の筋肉量の左右差（${d.armAsym.diffPct.toFixed(1)}%）があり、利き手側などへの負担偏在が考えられます。`);
+        addA(true, `腕の筋肉量に左右差（${d.armAsym.diffPct.toFixed(1)}%）があります。`);
+        addB(true, '利き手側などへの負担偏在が考えられますが、確定的な原因ではありません。');
       }
     }
 
     const card = document.createElement('div');
     card.className = 'cause-card';
     const sideText = {right:'（右側優位）', left:'（左側優位）', both:''}[d.side] || '';
-    if (reasons.length > 0) {
-      card.innerHTML = `<h4>${area}の痛み${sideText}</h4><ul>${reasons.map(r => `<li>${r}</li>`).join('')}</ul>`;
-    } else {
-      card.innerHTML = `<h4>${area}の痛み${sideText}</h4><p class="none">現在の測定データからは、明確に関連する要因は見つかりませんでした。筋骨格系以外の原因（姿勢・使いすぎ・外傷など）も考えられるため、症状が続く場合は医療機関でのご相談をおすすめします。</p>`;
-    }
+    const cItems = ADDITIONAL_ASSESSMENT_ITEMS[area] || [];
+
+    const section = (label, bodyHtml) => `<div class="finding-section"><h5>${label}</h5>${bodyHtml}</div>`;
+    const listOrNone = (arr, noneText) => arr.length
+      ? `<ul>${arr.map(r => `<li>${r}</li>`).join('')}</ul>`
+      : `<p class="none">${noneText}</p>`;
+
+    const html =
+      `<h4>${area}の痛み${sideText}</h4>` +
+      section('A. 確認できた身体組成の特徴', listOrNone(factsA, '基準から外れた特徴的な数値は見つかりませんでした。')) +
+      section('B. 痛みとの関連が一般的に指摘される要因（個別の因果関係ではありません）', listOrNone(mechB, '該当する一般的関連要因はありませんでした。')) +
+      section('C. 追加で確認が必要な評価項目', `<ul>${cItems.map(c => `<li>${c}</li>`).join('')}</ul>`) +
+      section('D. 現在のデータでは判断できないこと', `<p class="none">${UNKNOWN_DISCLAIMER}</p>`);
+
+    card.innerHTML = html;
     return card;
   }
 
