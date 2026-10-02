@@ -388,8 +388,13 @@
     width:min(900px,100%);max-height:92vh;display:flex;flex-direction:column;
   }
   #pdfLayoutRoot{
-    position:fixed;left:-99999px;top:0;width:740px;background:#fff;color:#111827;
+    /* html2canvasは要素のレイアウト座標を基準に描画するため、画面外に大きく
+       オフセットした位置（例: left:-99999px）に置くと空白のキャンバスになる
+       既知の問題がある。そのためleft:0/top:0に置き、プレビューオーバーレイ
+       （z-indexがより高い）で視覚的に覆い隠す方式に変更している。 */
+    position:fixed;left:0;top:0;width:740px;background:#fff;color:#111827;
     padding:24px;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    z-index:-1;
   }
   #pdfLayoutRoot .pdf-header{
     display:flex;align-items:center;gap:14px;border-bottom:2px solid #1f2937;
@@ -1002,8 +1007,8 @@
 <footer>InBody × 痛み因果診断アプリ &mdash; すべての処理はブラウザ内で完結します</footer>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="vendor/html2canvas.min.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -4150,14 +4155,22 @@
    * 同梱してjsPDFのVFSへ追加する必要があるが、本アプリは全文が日本語で
    * あり、そのためだけに大きなフォント資産を追加・管理するコストは見合わない
    * と判断した。代わりに、レポートのDOM（ブラウザ自身の日本語フォント
-   * レンダリングを利用）をhtml2canvasで画像化し、jsPDFでA4ページに貼り付ける
-   * 方式（jsPDFの.html()メソッドがhtml2canvasを内部的に利用する）を採用する。
+   * レンダリングを利用）をhtml2canvasで1枚の画像として描画し、A4ページの
+   * 高さ分ずつ自前で切り出してjsPDFに画像として貼り付ける方式を採用する。
+   *
+   * 補足: 当初jsPDFの.html()コンビニエンスメソッド（内部でhtml2canvasを
+   * 呼び出す）を使う設計としたが、実機確認（本番ライブラリをローカルに
+   * 取得しての実行テスト）の過程で、同メソッドが内部的に独自のテキスト
+   * レイヤーを重ねて描画しようとし、日本語の文字幅計測のずれにより文字が
+   * 重なって文字化けする問題が判明した。そのため上記の「html2canvasで画像化
+   * →自前でページ分割→addImage」という、文字を一切再描画しない方式に変更
+   * している。
    *
    * 制約（ユーザー向けにも明示する）:
    * ・出力されるPDFの文字は画像であり、PDF内でのテキスト選択・検索はできない。
-   * ・改ページ位置はjsPDFのautoPaging機能に委ねており、要素によっては
-   *   意図しない位置で分割される場合がある（page-break-inside:avoidで
-   *   主要なブロック単位の分割はある程度防止しているが、完全ではない）。
+   * ・改ページはA4ページの高さぴったりの位置で機械的に行われるため、表の行や
+   *   文章の途中で分割される場合がある（CSSのpage-break-inside等は、画像化
+   *   してから切り出す本方式には効果がないため使用していない）。
    * ・院名・ロゴはこの端末にのみ保存され、外部送信は行わない。
    * ========================================================================= */
   function blobToDataUrl(blob){
@@ -4250,15 +4263,41 @@
     layout.appendChild(footer);
 
     try {
+      // jsPDFの.html()コンビニエンスメソッドは内部で独自のテキストレイヤー処理を
+      // 行おうとし、日本語テキストの文字幅計測がずれて文字化け・文字の重なりを
+      // 引き起こすことが実機確認で判明したため使用しない。代わりにhtml2canvasで
+      // レポート全体を1枚の画像として描画し、A4ページの高さ分ずつ自前で切り出して
+      // jsPDFに画像として貼り付ける（文字はすべて画像化されるため、jsPDF側の
+      // フォント・文字コードの制約を受けない）。
+      const canvas = await window.html2canvas(layout, {
+        scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: layout.scrollWidth
+      });
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-      await doc.html(layout, {
-        margin: [12, 10, 12, 10],
-        autoPaging: 'text',
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        width: 190,
-        windowWidth: 740
-      });
+      const pageWidthMM = doc.internal.pageSize.getWidth();
+      const pageHeightMM = doc.internal.pageSize.getHeight();
+      const marginMM = 10;
+      const contentWidthMM = pageWidthMM - marginMM * 2;
+      const contentHeightMM = pageHeightMM - marginMM * 2;
+      const pxPerMM = canvas.width / contentWidthMM;
+      const pageHeightPx = Math.floor(contentHeightMM * pxPerMM);
+
+      let renderedPx = 0;
+      let pageIndex = 0;
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        sliceCanvas.getContext('2d').drawImage(
+          canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+        );
+        const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.92);
+        if (pageIndex > 0) doc.addPage();
+        doc.addImage(sliceData, 'JPEG', marginMM, marginMM, contentWidthMM, sliceHeightPx / pxPerMM);
+        renderedPx += sliceHeightPx;
+        pageIndex++;
+      }
       currentPdfBlob = doc.output('blob');
       if (currentPdfBlobUrl) URL.revokeObjectURL(currentPdfBlobUrl);
       currentPdfBlobUrl = URL.createObjectURL(currentPdfBlob);
