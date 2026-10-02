@@ -679,6 +679,11 @@
       <div id="historyContent" style="margin-top:10px;"></div>
     </details>
 
+    <details id="auditLogWrap" class="no-print" style="margin-top:10px;">
+      <summary>操作ログを見る（記録の保存・削除の履歴）</summary>
+      <div id="auditLogContent" style="margin-top:10px;"></div>
+    </details>
+
     <div id="practitionerView">
       <h3 style="margin-top:20px;font-size:.95rem;">計測値の評価</h3>
       <div class="table-scroll">
@@ -701,7 +706,20 @@
 
       <div class="disclaimer">
         本アプリの診断結果は、InBody計測値と一般的な傾向に基づく<strong>参考情報</strong>であり、医学的診断ではありません。強い痛みや長引く症状がある場合は、整形外科・内科などの医療機関を受診してください。画像や入力データはすべてお使いのブラウザ内で処理され、外部サーバーへ送信されることはありません。
+        <p style="margin:8px 0 0;">「B. 痛みとの関連が一般的に指摘される要因」に記載の機序は、個別の論文・ガイドラインとの照合を行っていない<strong>未検証</strong>の一般的生理学知識です。診断ロジックのバージョン: <span id="rulesetVersionTag"></span></p>
       </div>
+
+      <details id="evidenceNotesWrap" class="no-print" style="margin-top:10px;">
+        <summary>根拠資料メモ（端末内保存・任意）</summary>
+        <p class="desc" style="margin-top:8px;">施術者ご自身が確認した文献・ガイドライン等のメモをこの端末に保存できます（外部には送信されません）。診断ロジック自体には反映されず、記録として保持するのみです。</p>
+        <div class="field">
+          <textarea id="evidenceNoteInput" rows="3" placeholder="例: 〇〇学会ガイドライン2023 腰痛診療ガイドライン https://..."></textarea>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button type="button" id="addEvidenceNoteBtn" class="secondary">メモを追加</button>
+        </div>
+        <ul id="evidenceNoteList" style="margin-top:10px;font-size:.85rem;"></ul>
+      </details>
     </div>
 
     <div id="patientView" style="display:none;"></div>
@@ -2382,6 +2400,80 @@
   });
   printBtn.addEventListener('click', () => { window.print(); });
 
+  // 診断ロジック（evalBMI/evalPBF/evalVisceral/evalSMM/renderCauseCard等）のバージョン識別子。
+  // ロジックの判定条件・文言を変更したら更新する。保存した記録にも記録し、
+  // 「どのバージョンのロジックで出た結果か」を後から追跡できるようにする
+  const RULESET_VERSION = 'rules-2026-10-02.1';
+  document.getElementById('rulesetVersionTag').textContent = RULESET_VERSION;
+
+  /* ---------- 操作ログ（この端末のブラウザ内のみ。記録の保存・削除を追跡する簡易監査ログ） ---------- */
+  const AUDIT_LOG_STORAGE_KEY = 'inbodyAuditLog_v1';
+  const AUDIT_LOG_MAX = 500;
+
+  function logAudit(action, patientName, detail){
+    try {
+      const log = JSON.parse(localStorage.getItem(AUDIT_LOG_STORAGE_KEY)) || [];
+      log.push({ date: new Date().toISOString(), action, patientName, detail });
+      while (log.length > AUDIT_LOG_MAX) log.shift();
+      localStorage.setItem(AUDIT_LOG_STORAGE_KEY, JSON.stringify(log));
+    } catch (e) { /* ログが残らなくても機能自体は継続する */ }
+  }
+
+  function renderAuditLog(){
+    const content = document.getElementById('auditLogContent');
+    let log = [];
+    try { log = JSON.parse(localStorage.getItem(AUDIT_LOG_STORAGE_KEY)) || []; } catch (e) {}
+    if (log.length === 0) {
+      content.innerHTML = '<p class="desc">操作ログはまだありません。</p>';
+      return;
+    }
+    const ACTION_LABELS = {save:'記録を保存', delete:'記録を削除'};
+    const rows = log.slice().reverse().map(e =>
+      `<tr><td>${formatDate(e.date)}</td><td>${ACTION_LABELS[e.action] || e.action}</td><td>${e.patientName}</td><td>${e.detail || ''}</td></tr>`
+    ).join('');
+    content.innerHTML = `<table class="table-scroll" style="width:100%;font-size:.8rem;">
+      <thead><tr><th>日時</th><th>操作</th><th>患者名</th><th>詳細</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }
+  document.getElementById('auditLogWrap').addEventListener('toggle', function(){
+    if (this.open) renderAuditLog();
+  });
+
+  /* ---------- 根拠資料メモ（端末内保存・任意。診断ロジックには反映しない） ---------- */
+  const EVIDENCE_NOTES_STORAGE_KEY = 'inbodyEvidenceNotes_v1';
+  function loadEvidenceNotes(){
+    try { return JSON.parse(localStorage.getItem(EVIDENCE_NOTES_STORAGE_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  function renderEvidenceNotes(){
+    const notes = loadEvidenceNotes();
+    const list = document.getElementById('evidenceNoteList');
+    list.innerHTML = notes.length
+      ? notes.map((n, i) => `<li>${formatDate(n.date)}: ${n.text} <button type="button" class="secondary evidence-note-del" data-idx="${i}" style="margin-left:6px;padding:2px 8px;font-size:.75rem;">削除</button></li>`).join('')
+      : '<li class="none">メモはまだありません。</li>';
+    list.querySelectorAll('.evidence-note-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const notes2 = loadEvidenceNotes();
+        notes2.splice(parseInt(btn.dataset.idx, 10), 1);
+        try { localStorage.setItem(EVIDENCE_NOTES_STORAGE_KEY, JSON.stringify(notes2)); } catch (e) {}
+        renderEvidenceNotes();
+      });
+    });
+  }
+  document.getElementById('addEvidenceNoteBtn').addEventListener('click', () => {
+    const input = document.getElementById('evidenceNoteInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const notes = loadEvidenceNotes();
+    notes.push({ date: new Date().toISOString(), text });
+    try { localStorage.setItem(EVIDENCE_NOTES_STORAGE_KEY, JSON.stringify(notes)); } catch (e) {}
+    input.value = '';
+    renderEvidenceNotes();
+  });
+  document.getElementById('evidenceNotesWrap').addEventListener('toggle', function(){
+    if (this.open) renderEvidenceNotes();
+  });
+
   /* ---------- 患者別の記録保存・推移グラフ（この端末のブラウザ内のみ。他端末とは共有されない） ---------- */
   const PATIENT_RECORDS_STORAGE_KEY = 'inbodyPatientRecords_v1';
   const TREND_METRICS = [
@@ -2413,6 +2505,7 @@
     const painAreas = Array.from(document.querySelectorAll('#painChips input:checked')).map(c => c.value);
     const snapshot = {
       date: new Date().toISOString(),
+      rulesetVersion: RULESET_VERSION,
       weight: num('f_weight'), bmi: num('f_bmi'), pbf: num('f_pbf'), fatmass: num('f_fatmass'),
       smm: num('f_smm'), visceral: num('f_visceral'), muscle: num('f_muscle'),
       painAreas, intensity: parseInt(painIntensity.value, 10), duration: document.getElementById('painDuration').value
@@ -2421,6 +2514,7 @@
     if (!all[name]) all[name] = [];
     all[name].push(snapshot);
     saveAllRecords(all);
+    logAudit('save', name, `1件保存（合計${all[name].length}件）`);
     saveRecordStatus.textContent = `「${name}」の記録として保存しました（${all[name].length}件目）。`;
     if (historyWrap.open) renderHistory(name);
   });
@@ -2494,9 +2588,25 @@
       return;
     }
 
+    const deleteAllBtn = document.createElement('button');
+    deleteAllBtn.type = 'button';
+    deleteAllBtn.className = 'secondary';
+    deleteAllBtn.textContent = `「${name}」の記録をすべて削除`;
+    deleteAllBtn.addEventListener('click', () => {
+      if (!confirm(`「${name}」の保存済み記録（${records.length}件）をすべて削除します。この操作は取り消せません。よろしいですか？`)) return;
+      const all2 = loadAllRecords();
+      const count = (all2[name] || []).length;
+      delete all2[name];
+      saveAllRecords(all2);
+      logAudit('delete', name, `${count}件すべて削除`);
+      renderHistory(name);
+    });
+    historyContent.appendChild(deleteAllBtn);
+
     const selectWrap = document.createElement('div');
     selectWrap.className = 'field';
     selectWrap.style.maxWidth = '220px';
+    selectWrap.style.marginTop = '12px';
     selectWrap.innerHTML = `<label>グラフに表示する項目</label>
       <select id="trendMetricSelect">${TREND_METRICS.map(m => `<option value="${m.key}">${m.label}</option>`).join('')}</select>`;
     historyContent.appendChild(selectWrap);
@@ -2517,13 +2627,24 @@
     table.style.marginTop = '14px';
     table.style.width = '100%';
     table.style.fontSize = '.8rem';
-    table.innerHTML = `<thead><tr><th>日付</th><th>体重</th><th>BMI</th><th>体脂肪率</th><th>骨格筋量</th><th>内臓脂肪</th></tr></thead>
+    table.innerHTML = `<thead><tr><th>日付</th><th>体重</th><th>BMI</th><th>体脂肪率</th><th>骨格筋量</th><th>内臓脂肪</th><th></th></tr></thead>
       <tbody>${records.map(r => `<tr>
         <td>${formatDate(r.date)}</td>
         <td>${r.weight ?? '-'}</td><td>${r.bmi ?? '-'}</td><td>${r.pbf ?? '-'}</td>
         <td>${r.smm ?? '-'}</td><td>${r.visceral ?? '-'}</td>
+        <td><button type="button" class="secondary record-del-btn" data-date="${r.date}" style="padding:2px 8px;font-size:.75rem;">削除</button></td>
       </tr>`).join('')}</tbody>`;
     historyContent.appendChild(table);
+    table.querySelectorAll('.record-del-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!confirm('この記録を削除します。よろしいですか？')) return;
+        const all2 = loadAllRecords();
+        all2[name] = (all2[name] || []).filter(r => r.date !== btn.dataset.date);
+        saveAllRecords(all2);
+        logAudit('delete', name, '1件削除');
+        renderHistory(name);
+      });
+    });
 
     const note = document.createElement('p');
     note.className = 'desc';
