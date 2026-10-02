@@ -2839,7 +2839,9 @@
     );
 
     // ---- 過去の測定結果との比較（患者名が入力済みで、過去の記録がある場合のみ。IndexedDB読み込みのため非同期） ----
-    renderComparison(patientNameInput.value.trim(), { weight, bmi, pbf, smm, visceral });
+    renderComparison(patientNameInput.value.trim(), {
+      weight, bmi, pbf, smm, visceral, intensity, postureData, movementData, romData, muscleData
+    });
 
     document.getElementById('results').style.display = 'block';
     document.getElementById('results').scrollIntoView({behavior:'smooth', block:'start'});
@@ -3914,7 +3916,17 @@
     if (!patient) return;
     const visits = await VisitRepo.listByPatient(patient.id);
     if (visits.length === 0) return; // 初回来院（比較対象となる過去の記録なし）
-    const previous = visits[visits.length - 1].measurement || {};
+    const prevVisit = visits[visits.length - 1];
+    const previous = prevVisit.measurement || {};
+    const prevQuestionnaire = prevVisit.questionnaire || {};
+    const prevPosture = prevVisit.posture || {};
+    const prevMovement = prevVisit.movement || {};
+    const prevRom = prevVisit.rom || {};
+    const prevMuscle = prevVisit.muscleFunction || {};
+    const curPosture = current.postureData || {};
+    const curMovement = current.movementData || {};
+    const curRom = current.romData || {};
+    const curMuscle = current.muscleData || {};
 
     const rows = COMPARISON_METRICS.map(m => {
       const curVal = current[m.key];
@@ -3924,15 +3936,88 @@
       const diffText = (diff >= 0 ? '+' : '') + diff.toFixed(1) + (m.unit ? ' ' + m.unit : '');
       return `<tr><td>${m.label}</td><td>${prevVal}${m.unit}</td><td>${curVal}${m.unit}</td><td>${diffText}</td></tr>`;
     }).filter(Boolean);
-    if (rows.length === 0) return;
 
-    wrap.innerHTML = `
-      <h3 style="margin-top:24px;font-size:.95rem;">過去の測定結果との比較（前回: ${formatDateOnly(visits[visits.length - 1].date)}）</h3>
-      <div class="table-scroll"><table id="comparisonTable">
-        <thead><tr><th>項目</th><th>前回</th><th>今回</th><th>差</th></tr></thead>
-        <tbody>${rows.join('')}</tbody>
-      </table></div>
-      <p class="desc" style="margin-top:6px;">単日の数値だけで改善・悪化を断定しないでください。測定条件（時間帯・食事・運動の有無等）が異なると比較の信頼性が下がります。</p>`;
+    // 痛みの強度（自己申告）の比較。体組成とは異なり主観的評価であることに注意
+    if (current.intensity !== null && current.intensity !== undefined &&
+        prevQuestionnaire.intensity !== null && prevQuestionnaire.intensity !== undefined) {
+      const diff = current.intensity - prevQuestionnaire.intensity;
+      rows.push(`<tr><td>痛みの強度（自己申告 0〜10）</td><td>${prevQuestionnaire.intensity}</td><td>${current.intensity}</td><td>${(diff >= 0 ? '+' : '') + diff}</td></tr>`);
+    }
+
+    let html = '';
+    if (rows.length > 0) {
+      html += `
+        <h3 style="margin-top:24px;font-size:.95rem;">過去の測定結果との比較（前回: ${formatDateOnly(prevVisit.date)}）</h3>
+        <div class="table-scroll"><table id="comparisonTable">
+          <thead><tr><th>項目</th><th>前回</th><th>今回</th><th>差</th></tr></thead>
+          <tbody>${rows.join('')}</tbody>
+        </table></div>
+        <p class="desc" style="margin-top:6px;">単日の数値だけで改善・悪化を断定しないでください。測定条件（時間帯・食事・運動の有無等）が異なると比較の信頼性が下がります。痛みの強度は自己申告による主観的評価であり、体組成の数値とは性質が異なります。</p>`;
+    }
+
+    // ---- 姿勢評価の変化 ----
+    const hasCurPosture = Object.keys(curPosture).length > 0;
+    const hasPrevPosture = Object.keys(prevPosture).length > 0;
+    if (hasCurPosture && !hasPrevPosture) {
+      html += `<h3 style="margin-top:20px;font-size:.9rem;">姿勢評価の変化</h3><p class="desc">前回は姿勢評価が記録されていないため、比較できません。</p>`;
+    } else if (hasCurPosture && hasPrevPosture) {
+      const postureChanges = [];
+      new Set([...Object.keys(curPosture), ...Object.keys(prevPosture)]).forEach(view => {
+        const curItems = curPosture[view] || {};
+        const prevItems = prevPosture[view] || {};
+        Object.keys(curItems).forEach(label => {
+          if (label === '所見') return;
+          if (prevItems[label] !== undefined && prevItems[label] !== curItems[label]) {
+            postureChanges.push(`${view}の${label}：前回「${prevItems[label]}」→ 今回「${curItems[label]}」`);
+          }
+        });
+      });
+      if (postureChanges.length > 0) {
+        html += `<h3 style="margin-top:20px;font-size:.9rem;">姿勢評価の変化</h3><ul>${postureChanges.map(t => `<li>${t}</li>`).join('')}</ul>`;
+      }
+    }
+
+    // ---- 動作・可動域・筋機能評価の変化 ----
+    const hasCurMovement = Object.keys(curMovement).length > 0 || Object.keys(curRom).length > 0 || Object.keys(curMuscle).length > 0;
+    const hasPrevMovement = Object.keys(prevMovement).length > 0 || Object.keys(prevRom).length > 0 || Object.keys(prevMuscle).length > 0;
+    if (hasCurMovement && !hasPrevMovement) {
+      html += `<h3 style="margin-top:20px;font-size:.9rem;">動作・可動域・筋機能評価の変化</h3><p class="desc">前回は動作・可動域・筋機能評価が記録されていないため、比較できません。</p>`;
+    } else if (hasCurMovement && hasPrevMovement) {
+      const changes = [];
+      Object.keys(curMovement).forEach(m => {
+        const prev = prevMovement[m];
+        if (!prev) return;
+        ['ability', 'pain'].forEach(f => {
+          const label = f === 'ability' ? '動作の可否' : '痛みの有無';
+          if (prev[f] !== undefined && curMovement[m][f] !== undefined && prev[f] !== curMovement[m][f]) {
+            changes.push(`${m}の${label}：前回「${prev[f]}」→ 今回「${curMovement[m][f]}」`);
+          }
+        });
+      });
+      Object.keys(curRom).forEach(j => {
+        const prev = prevRom[j];
+        if (!prev) return;
+        ['right', 'left'].forEach(side => {
+          const cur = curRom[j][side];
+          if (cur !== undefined && prev[side] !== undefined && cur !== prev[side]) {
+            const diff = cur - prev[side];
+            changes.push(`${j}（${side === 'right' ? '右' : '左'}）の可動域：前回${prev[side]}度 → 今回${cur}度（差${diff >= 0 ? '+' : ''}${diff}度）`);
+          }
+        });
+      });
+      Object.keys(curMuscle).forEach(m => {
+        const prev = prevMuscle[m];
+        if (!prev) return;
+        if (prev.grade !== undefined && curMuscle[m].grade !== undefined && prev.grade !== curMuscle[m].grade) {
+          changes.push(`${m}の筋機能評価：前回「${prev.grade}」→ 今回「${curMuscle[m].grade}」`);
+        }
+      });
+      if (changes.length > 0) {
+        html += `<h3 style="margin-top:20px;font-size:.9rem;">動作・可動域・筋機能評価の変化</h3><ul>${changes.map(t => `<li>${t}</li>`).join('')}</ul>`;
+      }
+    }
+
+    wrap.innerHTML = html;
   }
 
   async function renderPatientList(){
