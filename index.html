@@ -40,6 +40,17 @@
     overflow-x:hidden;
     -webkit-tap-highlight-color:transparent;
   }
+  #lockScreen{
+    position:fixed;inset:0;z-index:9999;
+    background:rgba(15,23,42,.92);
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;
+  }
+  .lock-box{
+    background:#fff;border-radius:12px;padding:24px;max-width:360px;width:100%;
+  }
+  .lock-box h2{margin:0 0 10px;font-size:1.1rem;}
+
   header{
     background:linear-gradient(135deg,#1d4ed8,#2563eb);
     color:#fff;
@@ -393,12 +404,78 @@
 </head>
 <body>
 
+  <!-- アプリロック画面。ロックが有効な場合、正しいパスコード入力までこれが全体を覆う -->
+  <div id="lockScreen" style="display:none;">
+    <div class="lock-box">
+      <h2>アプリロック中</h2>
+      <p class="desc">この端末の利用者保護のための簡易ロックです。<strong>本格的な本人認証ではなく、技術的には回避され得る点にご注意ください。</strong></p>
+      <div class="field"><label for="lockPasscodeInput">パスコード</label><input type="password" id="lockPasscodeInput"></div>
+      <div class="row" style="margin-top:10px;">
+        <button type="button" id="unlockBtn">ロックを解除</button>
+      </div>
+      <p id="lockError" class="desc" style="color:var(--danger);margin-top:8px;"></p>
+      <details style="margin-top:16px;">
+        <summary>パスコードを忘れた場合</summary>
+        <p class="desc" style="margin-top:8px;">パスコードは復元できません。この端末に保存された全データ（患者情報・測定記録・文献メモ）を消去してリセットすることのみ可能です。事前にバックアップを取っている場合は、リセット後にインポートで復元できます。</p>
+        <div class="row" style="margin-top:8px;">
+          <button type="button" id="resetAllDataBtn" class="secondary">全データを消去してロックをリセット</button>
+        </div>
+      </details>
+    </div>
+  </div>
+
 <header>
   <h1>InBody × 痛み因果診断アプリ</h1>
   <p>InBody計測結果の画像から体の痛みとの関連要因を推定し、数値による危険度を予測します</p>
 </header>
 
 <main>
+
+  <!-- データ管理: 患者一覧・バックアップ/復元・アプリロック設定 -->
+  <section class="panel">
+    <h2>データ管理</h2>
+    <p class="desc">患者情報・測定記録・文献メモは、この端末のブラウザ内（IndexedDB）にのみ保存されます。外部サーバーや他の端末とは共有されません。<strong>端末の故障・紛失、ブラウザのデータ削除、OSの再インストール等で失われる可能性があります。</strong>定期的にバックアップ（エクスポート）を行ってください。</p>
+    <p class="desc" id="dataStatusLine">保存先: このブラウザのIndexedDB／最終バックアップ: 確認中…</p>
+
+    <details id="patientListWrap" style="margin-top:10px;">
+      <summary>患者一覧（編集・削除）</summary>
+      <div id="patientListContent" style="margin-top:10px;"></div>
+    </details>
+
+    <details id="backupWrap" style="margin-top:10px;">
+      <summary>バックアップ（エクスポート・インポート）</summary>
+      <div style="margin-top:10px;">
+        <h3 style="font-size:.9rem;">エクスポート（バックアップファイルを作成）</h3>
+        <p class="desc">バックアップファイルはパスワードで暗号化されます。パスワードは忘れずに保管してください（忘れると復元できません）。</p>
+        <div class="field" style="max-width:280px;"><label for="backupPassword">バックアップ用パスワード</label><input type="password" id="backupPassword"></div>
+        <div class="row" style="margin-top:8px;">
+          <button type="button" id="exportBackupBtn" class="secondary">バックアップファイルを作成</button>
+        </div>
+        <p id="exportStatus" class="desc" style="margin-top:6px;"></p>
+
+        <h3 style="font-size:.9rem;margin-top:18px;">インポート（バックアップから復元）</h3>
+        <div class="field" style="max-width:280px;"><label for="importFileInput">バックアップファイル</label><input type="file" id="importFileInput" accept=".json,.inbodybackup"></div>
+        <div class="field" style="max-width:280px;margin-top:8px;"><label for="restorePassword">パスワード</label><input type="password" id="restorePassword"></div>
+        <div class="row" style="margin-top:8px;">
+          <button type="button" id="importBackupBtn" class="secondary">復元する</button>
+        </div>
+        <p id="importStatus" class="desc" style="margin-top:6px;"></p>
+      </div>
+    </details>
+
+    <details id="lockSettingsWrap" style="margin-top:10px;">
+      <summary>アプリロック設定</summary>
+      <div style="margin-top:10px;">
+        <p class="desc">端末を共有する場合の簡易的な画面ロックです。<strong>本格的な本人認証ではありません</strong>（ブラウザの開発者ツール等で技術的には回避され得ます）。保存データ自体を保護するものではなく、画面を覗き見されにくくするための機能です。</p>
+        <p id="lockStatusLine" class="desc"></p>
+        <div class="field" style="max-width:280px;"><label for="newPasscodeInput">新しいパスコード</label><input type="password" id="newPasscodeInput"></div>
+        <div class="row" style="margin-top:8px;">
+          <button type="button" id="enableLockBtn" class="secondary">ロックを有効にする</button>
+          <button type="button" id="disableLockBtn" class="secondary">ロックを無効にする</button>
+        </div>
+      </div>
+    </details>
+  </section>
 
   <!-- STEP 1: 画像アップロード -->
   <section class="panel">
@@ -710,15 +787,37 @@
       </div>
 
       <details id="evidenceNotesWrap" class="no-print" style="margin-top:10px;">
-        <summary>根拠資料メモ（端末内保存・任意）</summary>
-        <p class="desc" style="margin-top:8px;">施術者ご自身が確認した文献・ガイドライン等のメモをこの端末に保存できます（外部には送信されません）。診断ロジック自体には反映されず、記録として保持するのみです。</p>
-        <div class="field">
-          <textarea id="evidenceNoteInput" rows="3" placeholder="例: 〇〇学会ガイドライン2023 腰痛診療ガイドライン https://..."></textarea>
+        <summary>根拠資料（文献）管理（端末内保存・任意）</summary>
+        <p class="desc" style="margin-top:8px;">施術者ご自身が内容を確認した文献・ガイドラインを構造化して記録できます（この端末にのみ保存、外部送信なし）。診断ロジック自体には反映されず、参照記録として保持するのみです。<strong>内容を確認していない文献は「確認済み」にしないでください。</strong></p>
+        <div class="grid">
+          <div class="field"><label for="evTitle">タイトル</label><input type="text" id="evTitle"></div>
+          <div class="field"><label for="evAuthors">著者・発行機関</label><input type="text" id="evAuthors"></div>
+          <div class="field"><label for="evYear">発行年</label><input type="number" id="evYear"></div>
+          <div class="field"><label for="evUrl">出典URL / DOI</label><input type="text" id="evUrl"></div>
+          <div class="field"><label for="evDesign">研究デザイン</label><input type="text" id="evDesign" placeholder="例: システマティックレビュー"></div>
+          <div class="field"><label for="evPopulation">対象集団</label><input type="text" id="evPopulation"></div>
         </div>
-        <div class="row" style="margin-top:8px;">
-          <button type="button" id="addEvidenceNoteBtn" class="secondary">メモを追加</button>
+        <div class="field" style="margin-top:10px;"><label for="evFindings">主な知見</label><textarea id="evFindings" rows="2"></textarea></div>
+        <div class="field" style="margin-top:10px;"><label for="evLimitations">研究上の限界</label><textarea id="evLimitations" rows="2"></textarea></div>
+        <div class="field" style="margin-top:10px;">
+          <label for="evLinkedRule">関連する評価ルール（任意）</label>
+          <select id="evLinkedRule">
+            <option value="">選択してください</option>
+            <option value="体脂肪率と痛覚過敏">体脂肪率と痛覚過敏（共通）</option>
+            <option value="内臓脂肪レベルと代謝負担">内臓脂肪レベルと代謝負担（共通）</option>
+            <option value="BMIと関節負荷">BMIと関節負荷（腰・膝・股関節）</option>
+            <option value="体幹筋肉量と腰部負担">体幹筋肉量と腰部・背中の負担</option>
+            <option value="左右差と姿勢">左右差と姿勢・負担偏在</option>
+            <option value="姿勢連鎖仮説">骨盤前傾からの姿勢連鎖仮説（膝・首・肩）</option>
+          </select>
         </div>
-        <ul id="evidenceNoteList" style="margin-top:10px;font-size:.85rem;"></ul>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:.85rem;">
+          <input type="checkbox" id="evVerified"> この文献の内容を自分で確認済みである
+        </label>
+        <div class="row" style="margin-top:10px;">
+          <button type="button" id="addEvidenceBtn" class="secondary">文献を登録</button>
+        </div>
+        <div id="evidenceList" style="margin-top:14px;"></div>
       </details>
     </div>
 
@@ -2406,89 +2505,419 @@
   const RULESET_VERSION = 'rules-2026-10-02.1';
   document.getElementById('rulesetVersionTag').textContent = RULESET_VERSION;
 
-  /* ---------- 操作ログ（この端末のブラウザ内のみ。記録の保存・削除を追跡する簡易監査ログ） ---------- */
-  const AUDIT_LOG_STORAGE_KEY = 'inbodyAuditLog_v1';
-  const AUDIT_LOG_MAX = 500;
+  /* =========================================================================
+   * データ層（Repository パターン・IndexedDB）
+   * UIコードはこの下のRepositoryオブジェクト（PatientRepo/VisitRepo/EvidenceRepo/
+   * AuditRepo/MetaRepo）のメソッドのみを呼び出す。将来クラウドDBへ移行する際は、
+   * この層の内部実装（IndexedDB→HTTP API等）を差し替えるだけで済むようにする。
+   * 大量の健康情報をlocalStorageに直接保存しない（構造化ローカルDBを使用する）。
+   * ========================================================================= */
+  const APP_DB_NAME = 'inbodyAppDB';
+  const APP_DB_VERSION = 1;
+  const SCHEMA_VERSION = 1; // 各レコードのschemaVersionフィールドに埋め込むバージョン
 
-  function logAudit(action, patientName, detail){
-    try {
-      const log = JSON.parse(localStorage.getItem(AUDIT_LOG_STORAGE_KEY)) || [];
-      log.push({ date: new Date().toISOString(), action, patientName, detail });
-      while (log.length > AUDIT_LOG_MAX) log.shift();
-      localStorage.setItem(AUDIT_LOG_STORAGE_KEY, JSON.stringify(log));
-    } catch (e) { /* ログが残らなくても機能自体は継続する */ }
-  }
-
-  function renderAuditLog(){
-    const content = document.getElementById('auditLogContent');
-    let log = [];
-    try { log = JSON.parse(localStorage.getItem(AUDIT_LOG_STORAGE_KEY)) || []; } catch (e) {}
-    if (log.length === 0) {
-      content.innerHTML = '<p class="desc">操作ログはまだありません。</p>';
-      return;
-    }
-    const ACTION_LABELS = {save:'記録を保存', delete:'記録を削除'};
-    const rows = log.slice().reverse().map(e =>
-      `<tr><td>${formatDate(e.date)}</td><td>${ACTION_LABELS[e.action] || e.action}</td><td>${e.patientName}</td><td>${e.detail || ''}</td></tr>`
-    ).join('');
-    content.innerHTML = `<table class="table-scroll" style="width:100%;font-size:.8rem;">
-      <thead><tr><th>日時</th><th>操作</th><th>患者名</th><th>詳細</th></tr></thead>
-      <tbody>${rows}</tbody></table>`;
-  }
-  document.getElementById('auditLogWrap').addEventListener('toggle', function(){
-    if (this.open) renderAuditLog();
-  });
-
-  /* ---------- 根拠資料メモ（端末内保存・任意。診断ロジックには反映しない） ---------- */
-  const EVIDENCE_NOTES_STORAGE_KEY = 'inbodyEvidenceNotes_v1';
-  function loadEvidenceNotes(){
-    try { return JSON.parse(localStorage.getItem(EVIDENCE_NOTES_STORAGE_KEY)) || []; }
-    catch (e) { return []; }
-  }
-  function renderEvidenceNotes(){
-    const notes = loadEvidenceNotes();
-    const list = document.getElementById('evidenceNoteList');
-    list.innerHTML = notes.length
-      ? notes.map((n, i) => `<li>${formatDate(n.date)}: ${n.text} <button type="button" class="secondary evidence-note-del" data-idx="${i}" style="margin-left:6px;padding:2px 8px;font-size:.75rem;">削除</button></li>`).join('')
-      : '<li class="none">メモはまだありません。</li>';
-    list.querySelectorAll('.evidence-note-del').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const notes2 = loadEvidenceNotes();
-        notes2.splice(parseInt(btn.dataset.idx, 10), 1);
-        try { localStorage.setItem(EVIDENCE_NOTES_STORAGE_KEY, JSON.stringify(notes2)); } catch (e) {}
-        renderEvidenceNotes();
-      });
+  function openAppDB(){
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(APP_DB_NAME, APP_DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('patients')) {
+          db.createObjectStore('patients', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('visits')) {
+          const s = db.createObjectStore('visits', { keyPath: 'id' });
+          s.createIndex('patientId', 'patientId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('evidence')) {
+          db.createObjectStore('evidence', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('auditLog')) {
+          db.createObjectStore('auditLog', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('meta')) {
+          db.createObjectStore('meta', { keyPath: 'key' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
     });
   }
-  document.getElementById('addEvidenceNoteBtn').addEventListener('click', () => {
-    const input = document.getElementById('evidenceNoteInput');
-    const text = input.value.trim();
-    if (!text) return;
-    const notes = loadEvidenceNotes();
-    notes.push({ date: new Date().toISOString(), text });
-    try { localStorage.setItem(EVIDENCE_NOTES_STORAGE_KEY, JSON.stringify(notes)); } catch (e) {}
-    input.value = '';
-    renderEvidenceNotes();
-  });
-  document.getElementById('evidenceNotesWrap').addEventListener('toggle', function(){
-    if (this.open) renderEvidenceNotes();
+  let dbPromise = null;
+  function getDB(){ if (!dbPromise) dbPromise = openAppDB(); return dbPromise; }
+  // indexedDB.deleteDatabase()は接続が開いたままだとonblockedのままいつまでも完了しない。
+  // 全データ消去の前に必ず呼び出し、保持中の接続を閉じる
+  async function closeDB(){
+    if (dbPromise) {
+      const db = await dbPromise;
+      db.close();
+      dbPromise = null;
+    }
+  }
+
+  function dbPut(storeName, value){
+    return getDB().then(db => new Promise((resolve, reject) => {
+      const t = db.transaction(storeName, 'readwrite');
+      t.objectStore(storeName).put(value);
+      t.oncomplete = () => resolve(value);
+      t.onerror = () => reject(t.error);
+    }));
+  }
+  function dbGet(storeName, key){
+    return getDB().then(db => new Promise((resolve, reject) => {
+      const req = db.transaction(storeName, 'readonly').objectStore(storeName).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    }));
+  }
+  function dbGetAll(storeName){
+    return getDB().then(db => new Promise((resolve, reject) => {
+      const req = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    }));
+  }
+  function dbGetAllByIndex(storeName, indexName, value){
+    return getDB().then(db => new Promise((resolve, reject) => {
+      const req = db.transaction(storeName, 'readonly').objectStore(storeName).index(indexName).getAll(value);
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    }));
+  }
+  function dbDelete(storeName, key){
+    return getDB().then(db => new Promise((resolve, reject) => {
+      const t = db.transaction(storeName, 'readwrite');
+      t.objectStore(storeName).delete(key);
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+    }));
+  }
+  function genId(){
+    return (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+  }
+
+  const PatientRepo = {
+    async listAll(){
+      const all = await dbGetAll('patients');
+      return all.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    },
+    async get(id){ return dbGet('patients', id); },
+    async findByName(name){
+      const all = await dbGetAll('patients');
+      return all.find(p => p.name === name) || null;
+    },
+    async create(name){
+      const now = new Date().toISOString();
+      const patient = { id: genId(), name, createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION };
+      await dbPut('patients', patient);
+      return patient;
+    },
+    async rename(id, newName){
+      const p = await dbGet('patients', id);
+      if (!p) throw new Error('患者が見つかりません');
+      p.name = newName;
+      p.updatedAt = new Date().toISOString();
+      await dbPut('patients', p);
+      return p;
+    },
+    async remove(id){
+      const visits = await dbGetAllByIndex('visits', 'patientId', id);
+      for (const v of visits) await dbDelete('visits', v.id);
+      await dbDelete('patients', id);
+      return visits.length;
+    }
+  };
+
+  const VisitRepo = {
+    async listByPatient(patientId){
+      const all = await dbGetAllByIndex('visits', 'patientId', patientId);
+      return all.sort((a, b) => new Date(a.date) - new Date(b.date));
+    },
+    async create(patientId, data){
+      const now = new Date().toISOString();
+      const visit = Object.assign(
+        { id: genId(), patientId, createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION }, data
+      );
+      await dbPut('visits', visit);
+      return visit;
+    },
+    async remove(id){ await dbDelete('visits', id); }
+  };
+
+  const EvidenceRepo = {
+    async listAll(){
+      const all = await dbGetAll('evidence');
+      return all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    },
+    async create(data){
+      const now = new Date().toISOString();
+      const rec = Object.assign(
+        { id: genId(), createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, verified: false }, data
+      );
+      await dbPut('evidence', rec);
+      return rec;
+    },
+    async remove(id){ await dbDelete('evidence', id); }
+  };
+
+  const AuditRepo = {
+    async append(action, patientName, detail){
+      await dbPut('auditLog', { id: genId(), date: new Date().toISOString(), action, patientName, detail });
+      const all = await dbGetAll('auditLog');
+      if (all.length > 500) {
+        const sorted = all.sort((a, b) => new Date(a.date) - new Date(b.date));
+        for (const e of sorted.slice(0, all.length - 500)) await dbDelete('auditLog', e.id);
+      }
+    },
+    async listRecent(limit){
+      const all = await dbGetAll('auditLog');
+      return all.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, limit || 200);
+    }
+  };
+
+  const MetaRepo = {
+    async get(key){ const r = await dbGet('meta', key); return r ? r.value : null; },
+    async set(key, value){ await dbPut('meta', { key, value }); }
+  };
+
+  // ---- 旧バージョン（localStorage）からの一度限りの移行 ----
+  // 要件: 「ブラウザのlocalStorageに大量の患者情報や健康情報を直接保存しない」ため、
+  // 移行後は該当のlocalStorageキーを削除する
+  async function migrateFromLocalStorageIfNeeded(){
+    if (await MetaRepo.get('migratedFromLocalStorage')) return;
+    try {
+      const oldRecords = JSON.parse(localStorage.getItem('inbodyPatientRecords_v1') || '{}');
+      for (const name in oldRecords) {
+        let patient = await PatientRepo.findByName(name);
+        if (!patient) patient = await PatientRepo.create(name);
+        for (const r of oldRecords[name]) {
+          await VisitRepo.create(patient.id, {
+            date: r.date, rulesetVersion: r.rulesetVersion || null,
+            measurement: { weight: r.weight, bmi: r.bmi, pbf: r.pbf, fatmass: r.fatmass, smm: r.smm, visceral: r.visceral, muscle: r.muscle },
+            questionnaire: { painAreas: r.painAreas, intensity: r.intensity, duration: r.duration }
+          });
+        }
+      }
+      const oldNotes = JSON.parse(localStorage.getItem('inbodyEvidenceNotes_v1') || '[]');
+      for (const n of oldNotes) {
+        await EvidenceRepo.create({ title: n.text, authors: '', year: null, url: '', studyDesign: '', population: '', keyFindings: '', limitations: '', linkedRule: '', verified: false });
+      }
+      const oldAudit = JSON.parse(localStorage.getItem('inbodyAuditLog_v1') || '[]');
+      for (const a of oldAudit) {
+        await dbPut('auditLog', { id: genId(), date: a.date, action: a.action, patientName: a.patientName, detail: a.detail });
+      }
+      localStorage.removeItem('inbodyPatientRecords_v1');
+      localStorage.removeItem('inbodyEvidenceNotes_v1');
+      localStorage.removeItem('inbodyAuditLog_v1');
+      await MetaRepo.set('migratedFromLocalStorage', true);
+    } catch (e) {
+      console.error('旧データの移行に失敗しました', e);
+    }
+  }
+
+  function formatDate(iso){
+    if (!iso) return '-';
+    const d = new Date(iso);
+    return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  }
+  function formatDateOnly(iso){
+    const d = new Date(iso);
+    return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+  }
+
+  /* =========================================================================
+   * 暗号化バックアップ（エクスポート／インポート）— Web Crypto API（PBKDF2 + AES-GCM）
+   * ========================================================================= */
+  async function deriveKey(passphrase, saltBytes){
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: saltBytes, iterations: 150000, hash: 'SHA-256' },
+      keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+    );
+  }
+  function toBase64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+  function fromBase64(b64){ return Uint8Array.from(atob(b64), c => c.charCodeAt(0)); }
+
+  async function exportEncryptedBackup(passphrase){
+    const [patients, visits, evidence] = await Promise.all([dbGetAll('patients'), dbGetAll('visits'), dbGetAll('evidence')]);
+    const payload = { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), patients, visits, evidence };
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(passphrase, salt);
+    const enc = new TextEncoder();
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(payload)));
+    return {
+      appId: 'inbody-pain-diagnosis-backup', schemaVersion: SCHEMA_VERSION, exportedAt: payload.exportedAt,
+      salt: toBase64(salt), iv: toBase64(iv), ciphertext: toBase64(ciphertext)
+    };
+  }
+
+  async function importEncryptedBackup(fileObj, passphrase){
+    if (!fileObj.salt || !fileObj.iv || !fileObj.ciphertext) {
+      throw new Error('バックアップファイルの形式が正しくありません。');
+    }
+    const key = await deriveKey(passphrase, fromBase64(fileObj.salt));
+    let plainBuf;
+    try {
+      plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(fileObj.iv) }, key, fromBase64(fileObj.ciphertext));
+    } catch (e) {
+      throw new Error('復元できませんでした。パスワードが正しいか、ファイルが壊れていないかご確認ください。');
+    }
+    const payload = JSON.parse(new TextDecoder().decode(plainBuf));
+    if (!payload.schemaVersion) throw new Error('バックアップファイルの内容が不正です。');
+    for (const p of (payload.patients || [])) await dbPut('patients', p);
+    for (const v of (payload.visits || [])) await dbPut('visits', v);
+    for (const e of (payload.evidence || [])) await dbPut('evidence', e);
+    return payload;
+  }
+
+  async function updateDataStatusLine(){
+    const lastBackup = await MetaRepo.get('lastBackupAt');
+    const lastRestore = await MetaRepo.get('lastRestoreAt');
+    let text = '保存先: このブラウザのIndexedDB／最終バックアップ: ' + (lastBackup ? formatDate(lastBackup) : '未実施');
+    if (lastRestore) text += `／最終復元: ${formatDate(lastRestore)}`;
+    document.getElementById('dataStatusLine').textContent = text;
+  }
+
+  document.getElementById('exportBackupBtn').addEventListener('click', async () => {
+    const status = document.getElementById('exportStatus');
+    const pw = document.getElementById('backupPassword').value;
+    if (!pw || pw.length < 4) {
+      status.textContent = 'バックアップ用パスワードを4文字以上で入力してください。';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+    status.textContent = '作成中…';
+    status.style.color = 'var(--muted)';
+    try {
+      const backup = await exportEncryptedBackup(pw);
+      const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `inbody-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      await MetaRepo.set('lastBackupAt', new Date().toISOString());
+      await AuditRepo.append('backup', '-', 'バックアップファイルを作成');
+      await updateDataStatusLine();
+      status.textContent = 'バックアップファイルを作成しました。ダウンロードフォルダ等をご確認ください。';
+      status.style.color = 'var(--safe)';
+    } catch (e) {
+      console.error(e);
+      status.textContent = 'バックアップの作成に失敗しました。';
+      status.style.color = 'var(--danger)';
+    }
   });
 
-  /* ---------- 患者別の記録保存・推移グラフ（この端末のブラウザ内のみ。他端末とは共有されない） ---------- */
-  const PATIENT_RECORDS_STORAGE_KEY = 'inbodyPatientRecords_v1';
+  document.getElementById('importBackupBtn').addEventListener('click', async () => {
+    const status = document.getElementById('importStatus');
+    const fileInput = document.getElementById('importFileInput');
+    const pw = document.getElementById('restorePassword').value;
+    if (!fileInput.files || !fileInput.files[0]) {
+      status.textContent = 'バックアップファイルを選択してください。';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+    if (!pw) {
+      status.textContent = 'パスワードを入力してください。';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+    status.textContent = '復元中…';
+    status.style.color = 'var(--muted)';
+    try {
+      const text = await fileInput.files[0].text();
+      const fileObj = JSON.parse(text);
+      const payload = await importEncryptedBackup(fileObj, pw);
+      await MetaRepo.set('lastRestoreAt', new Date().toISOString());
+      await AuditRepo.append('restore', '-', `復元（患者${(payload.patients||[]).length}件・記録${(payload.visits||[]).length}件）`);
+      await updateDataStatusLine();
+      await renderPatientList();
+      status.textContent = `復元しました（患者${(payload.patients||[]).length}件・記録${(payload.visits||[]).length}件・文献${(payload.evidence||[]).length}件）。`;
+      status.style.color = 'var(--safe)';
+    } catch (e) {
+      console.error(e);
+      status.textContent = e.message || '復元に失敗しました。';
+      status.style.color = 'var(--danger)';
+    }
+  });
+
+  /* =========================================================================
+   * アプリロック（端末共有時の簡易画面ロック。本格的な本人認証ではない）
+   * ========================================================================= */
+  async function sha256Hex(text){
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function updateLockStatusLine(){
+    const hash = await MetaRepo.get('lockPasscodeHash');
+    document.getElementById('lockStatusLine').textContent = hash ? '現在: ロック有効' : '現在: ロック無効';
+  }
+
+  document.getElementById('enableLockBtn').addEventListener('click', async () => {
+    const code = document.getElementById('newPasscodeInput').value;
+    if (!code || code.length < 4) { alert('パスコードは4文字以上で設定してください。'); return; }
+    const salt = genId();
+    const hash = await sha256Hex(salt + code);
+    await MetaRepo.set('lockPasscodeSalt', salt);
+    await MetaRepo.set('lockPasscodeHash', hash);
+    document.getElementById('newPasscodeInput').value = '';
+    await updateLockStatusLine();
+    alert('アプリロックを有効にしました。次回このページを開く際にパスコードが必要になります。');
+  });
+  document.getElementById('disableLockBtn').addEventListener('click', async () => {
+    await MetaRepo.set('lockPasscodeHash', null);
+    await MetaRepo.set('lockPasscodeSalt', null);
+    await updateLockStatusLine();
+    alert('アプリロックを無効にしました。');
+  });
+
+  document.getElementById('unlockBtn').addEventListener('click', async () => {
+    const input = document.getElementById('lockPasscodeInput').value;
+    const salt = await MetaRepo.get('lockPasscodeSalt');
+    const storedHash = await MetaRepo.get('lockPasscodeHash');
+    const hash = await sha256Hex(salt + input);
+    if (hash === storedHash) {
+      document.getElementById('lockScreen').style.display = 'none';
+      try { sessionStorage.setItem('inbodyAppUnlocked', '1'); } catch (e) {}
+    } else {
+      document.getElementById('lockError').textContent = 'パスコードが違います。';
+    }
+  });
+  document.getElementById('resetAllDataBtn').addEventListener('click', async () => {
+    if (!confirm('この端末に保存された全データ（患者情報・測定記録・文献メモ）を完全に削除します。バックアップを取っていない場合、復元できません。本当に実行しますか？')) return;
+    await closeDB();
+    await new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(APP_DB_NAME);
+      req.onsuccess = resolve;
+      req.onerror = resolve;
+      req.onblocked = resolve; // ブロックされても処理を進め、再読み込みで解消させる
+    });
+    try { sessionStorage.removeItem('inbodyAppUnlocked'); } catch (e) {}
+    alert('データを消去しました。ページを再読み込みします。');
+    location.reload();
+  });
+
+  async function checkLockOnLoad(){
+    const storedHash = await MetaRepo.get('lockPasscodeHash');
+    if (!storedHash) return; // ロック無効
+    let unlockedThisSession = false;
+    try { unlockedThisSession = sessionStorage.getItem('inbodyAppUnlocked') === '1'; } catch (e) {}
+    if (!unlockedThisSession) document.getElementById('lockScreen').style.display = 'flex';
+  }
+
+  /* =========================================================================
+   * 患者別の記録保存・推移グラフ・患者一覧（この端末のIndexedDBのみ。他端末とは共有されない）
+   * ========================================================================= */
   const TREND_METRICS = [
     {key:'weight', label:'体重 (kg)'}, {key:'bmi', label:'BMI'}, {key:'pbf', label:'体脂肪率 (%)'},
     {key:'smm', label:'骨格筋量 (kg)'}, {key:'visceral', label:'内臓脂肪レベル'}
   ];
-
-  function loadAllRecords(){
-    try { return JSON.parse(localStorage.getItem(PATIENT_RECORDS_STORAGE_KEY)) || {}; }
-    catch (e) { return {}; }
-  }
-  function saveAllRecords(all){
-    try { localStorage.setItem(PATIENT_RECORDS_STORAGE_KEY, JSON.stringify(all)); }
-    catch (e) { /* 保存できなくても致命的ではない（例: プライベートブラウジング） */ }
-  }
 
   const patientNameInput = document.getElementById('patientName');
   const saveRecordBtn = document.getElementById('saveRecordBtn');
@@ -2496,40 +2925,37 @@
   const historyWrap = document.getElementById('historyWrap');
   const historyContent = document.getElementById('historyContent');
 
-  saveRecordBtn.addEventListener('click', () => {
+  saveRecordBtn.addEventListener('click', async () => {
     const name = patientNameInput.value.trim();
     if (!name) {
       saveRecordStatus.textContent = '患者名を入力してから保存してください（ステップ1）。';
       return;
     }
+    saveRecordStatus.textContent = '保存中…';
+    let patient = await PatientRepo.findByName(name);
+    if (!patient) patient = await PatientRepo.create(name);
     const painAreas = Array.from(document.querySelectorAll('#painChips input:checked')).map(c => c.value);
-    const snapshot = {
+    await VisitRepo.create(patient.id, {
       date: new Date().toISOString(),
       rulesetVersion: RULESET_VERSION,
-      weight: num('f_weight'), bmi: num('f_bmi'), pbf: num('f_pbf'), fatmass: num('f_fatmass'),
-      smm: num('f_smm'), visceral: num('f_visceral'), muscle: num('f_muscle'),
-      painAreas, intensity: parseInt(painIntensity.value, 10), duration: document.getElementById('painDuration').value
-    };
-    const all = loadAllRecords();
-    if (!all[name]) all[name] = [];
-    all[name].push(snapshot);
-    saveAllRecords(all);
-    logAudit('save', name, `1件保存（合計${all[name].length}件）`);
-    saveRecordStatus.textContent = `「${name}」の記録として保存しました（${all[name].length}件目）。`;
+      measurement: {
+        weight: num('f_weight'), bmi: num('f_bmi'), pbf: num('f_pbf'), fatmass: num('f_fatmass'),
+        smm: num('f_smm'), visceral: num('f_visceral'), muscle: num('f_muscle')
+      },
+      questionnaire: { painAreas, intensity: parseInt(painIntensity.value, 10), duration: document.getElementById('painDuration').value }
+    });
+    const count = (await VisitRepo.listByPatient(patient.id)).length;
+    await AuditRepo.append('save', name, `1件保存（合計${count}件）`);
+    saveRecordStatus.textContent = `「${name}」の記録として保存しました（${count}件目）。`;
     if (historyWrap.open) renderHistory(name);
   });
 
-  function formatDate(iso){
-    const d = new Date(iso);
-    return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
-  }
-
-  function drawTrendChart(canvas, records, metricKey){
+  function drawTrendChart(canvas, visits, metricKey){
     const ctx = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-    const points = records
-      .map(r => ({ date: r.date, value: r[metricKey] }))
+    const points = visits
+      .map(v => ({ date: v.date, value: v.measurement ? v.measurement[metricKey] : null }))
       .filter(p => p.value !== null && p.value !== undefined);
     const padL = 42, padR = 12, padT = 12, padB = 24;
     ctx.strokeStyle = '#d1d5db';
@@ -2556,18 +2982,14 @@
     ctx.stroke();
 
     ctx.fillStyle = '#2563eb';
-    points.forEach((p, i) => {
-      ctx.beginPath();
-      ctx.arc(x(i), y(p.value), 3, 0, Math.PI * 2);
-      ctx.fill();
-    });
+    points.forEach((p, i) => { ctx.beginPath(); ctx.arc(x(i), y(p.value), 3, 0, Math.PI * 2); ctx.fill(); });
 
     ctx.fillStyle = '#374151';
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     points.forEach((p, i) => {
       if (points.length > 8 && i % Math.ceil(points.length / 8) !== 0 && i !== points.length - 1) return;
-      ctx.fillText(formatDate(p.date), x(i), h - 6);
+      ctx.fillText(formatDateOnly(p.date), x(i), h - 6);
     });
     ctx.textAlign = 'right';
     ctx.fillText(max.toFixed(1), padL - 4, padT + 8);
@@ -2575,15 +2997,19 @@
     ctx.textAlign = 'left';
   }
 
-  function renderHistory(name){
+  async function renderHistory(name){
     historyContent.innerHTML = '';
     if (!name) {
       historyContent.innerHTML = '<p class="desc">ステップ1で患者名を入力すると、その患者の記録を表示できます。</p>';
       return;
     }
-    const all = loadAllRecords();
-    const records = (all[name] || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
-    if (records.length === 0) {
+    const patient = await PatientRepo.findByName(name);
+    if (!patient) {
+      historyContent.innerHTML = `<p class="desc">「${name}」の保存済み記録はまだありません。</p>`;
+      return;
+    }
+    const visits = await VisitRepo.listByPatient(patient.id);
+    if (visits.length === 0) {
       historyContent.innerHTML = `<p class="desc">「${name}」の保存済み記録はまだありません。</p>`;
       return;
     }
@@ -2592,13 +3018,10 @@
     deleteAllBtn.type = 'button';
     deleteAllBtn.className = 'secondary';
     deleteAllBtn.textContent = `「${name}」の記録をすべて削除`;
-    deleteAllBtn.addEventListener('click', () => {
-      if (!confirm(`「${name}」の保存済み記録（${records.length}件）をすべて削除します。この操作は取り消せません。よろしいですか？`)) return;
-      const all2 = loadAllRecords();
-      const count = (all2[name] || []).length;
-      delete all2[name];
-      saveAllRecords(all2);
-      logAudit('delete', name, `${count}件すべて削除`);
+    deleteAllBtn.addEventListener('click', async () => {
+      if (!confirm(`「${name}」の保存済み記録（${visits.length}件）をすべて削除します。この操作は取り消せません。よろしいですか？`)) return;
+      for (const v of visits) await VisitRepo.remove(v.id);
+      await AuditRepo.append('delete', name, `${visits.length}件すべて削除`);
       renderHistory(name);
     });
     historyContent.appendChild(deleteAllBtn);
@@ -2618,7 +3041,7 @@
     historyContent.appendChild(canvas);
 
     const select = selectWrap.querySelector('#trendMetricSelect');
-    const redraw = () => drawTrendChart(canvas, records, select.value);
+    const redraw = () => drawTrendChart(canvas, visits, select.value);
     select.addEventListener('change', redraw);
     redraw();
 
@@ -2628,20 +3051,18 @@
     table.style.width = '100%';
     table.style.fontSize = '.8rem';
     table.innerHTML = `<thead><tr><th>日付</th><th>体重</th><th>BMI</th><th>体脂肪率</th><th>骨格筋量</th><th>内臓脂肪</th><th></th></tr></thead>
-      <tbody>${records.map(r => `<tr>
-        <td>${formatDate(r.date)}</td>
-        <td>${r.weight ?? '-'}</td><td>${r.bmi ?? '-'}</td><td>${r.pbf ?? '-'}</td>
-        <td>${r.smm ?? '-'}</td><td>${r.visceral ?? '-'}</td>
-        <td><button type="button" class="secondary record-del-btn" data-date="${r.date}" style="padding:2px 8px;font-size:.75rem;">削除</button></td>
-      </tr>`).join('')}</tbody>`;
+      <tbody>${visits.map(v => { const m = v.measurement || {}; return `<tr>
+        <td>${formatDateOnly(v.date)}</td>
+        <td>${m.weight ?? '-'}</td><td>${m.bmi ?? '-'}</td><td>${m.pbf ?? '-'}</td>
+        <td>${m.smm ?? '-'}</td><td>${m.visceral ?? '-'}</td>
+        <td><button type="button" class="secondary visit-del-btn" data-id="${v.id}" style="padding:2px 8px;font-size:.75rem;">削除</button></td>
+      </tr>`; }).join('')}</tbody>`;
     historyContent.appendChild(table);
-    table.querySelectorAll('.record-del-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+    table.querySelectorAll('.visit-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
         if (!confirm('この記録を削除します。よろしいですか？')) return;
-        const all2 = loadAllRecords();
-        all2[name] = (all2[name] || []).filter(r => r.date !== btn.dataset.date);
-        saveAllRecords(all2);
-        logAudit('delete', name, '1件削除');
+        await VisitRepo.remove(btn.dataset.id);
+        await AuditRepo.append('delete', name, '1件削除');
         renderHistory(name);
       });
     });
@@ -2656,6 +3077,132 @@
   historyWrap.addEventListener('toggle', () => {
     if (historyWrap.open) renderHistory(patientNameInput.value.trim());
   });
+
+  async function renderPatientList(){
+    const content = document.getElementById('patientListContent');
+    const patients = await PatientRepo.listAll();
+    if (patients.length === 0) {
+      content.innerHTML = '<p class="desc">まだ患者が登録されていません（ステップ1で患者名を入力し記録を保存すると登録されます）。</p>';
+      return;
+    }
+    const rows = await Promise.all(patients.map(async p => {
+      const visits = await VisitRepo.listByPatient(p.id);
+      const last = visits.length ? formatDateOnly(visits[visits.length - 1].date) : '-';
+      return `<tr>
+        <td>${p.name}</td><td>${visits.length}件</td><td>${last}</td>
+        <td>
+          <button type="button" class="secondary patient-rename-btn" data-id="${p.id}" data-name="${p.name}" style="padding:2px 8px;font-size:.75rem;">名前変更</button>
+          <button type="button" class="secondary patient-remove-btn" data-id="${p.id}" data-name="${p.name}" style="padding:2px 8px;font-size:.75rem;">削除</button>
+        </td>
+      </tr>`;
+    }));
+    content.innerHTML = `<table class="table-scroll" style="width:100%;font-size:.85rem;">
+      <thead><tr><th>患者名</th><th>記録数</th><th>最終来院</th><th></th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table>`;
+    content.querySelectorAll('.patient-rename-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const newName = prompt('新しい患者名を入力してください', btn.dataset.name);
+        if (!newName || !newName.trim() || newName.trim() === btn.dataset.name) return;
+        await PatientRepo.rename(btn.dataset.id, newName.trim());
+        await AuditRepo.append('rename', btn.dataset.name, `「${newName.trim()}」に変更`);
+        if (patientNameInput.value.trim() === btn.dataset.name) patientNameInput.value = newName.trim();
+        renderPatientList();
+      });
+    });
+    content.querySelectorAll('.patient-remove-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`患者「${btn.dataset.name}」とその全記録を削除します。この操作は取り消せません。よろしいですか？`)) return;
+        const removedCount = await PatientRepo.remove(btn.dataset.id);
+        await AuditRepo.append('delete', btn.dataset.name, `患者ごと削除（記録${removedCount}件）`);
+        renderPatientList();
+        if (historyWrap.open) renderHistory(patientNameInput.value.trim());
+      });
+    });
+  }
+  document.getElementById('patientListWrap').addEventListener('toggle', function(){
+    if (this.open) renderPatientList();
+  });
+
+  /* ---------- 操作ログ ---------- */
+  async function renderAuditLog(){
+    const content = document.getElementById('auditLogContent');
+    const log = await AuditRepo.listRecent(200);
+    if (log.length === 0) {
+      content.innerHTML = '<p class="desc">操作ログはまだありません。</p>';
+      return;
+    }
+    const ACTION_LABELS = {save:'記録を保存', delete:'記録を削除', rename:'患者名を変更', backup:'バックアップ作成', restore:'バックアップから復元'};
+    const rows = log.map(e =>
+      `<tr><td>${formatDate(e.date)}</td><td>${ACTION_LABELS[e.action] || e.action}</td><td>${e.patientName}</td><td>${e.detail || ''}</td></tr>`
+    ).join('');
+    content.innerHTML = `<table class="table-scroll" style="width:100%;font-size:.8rem;">
+      <thead><tr><th>日時</th><th>操作</th><th>患者名</th><th>詳細</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }
+  document.getElementById('auditLogWrap').addEventListener('toggle', function(){
+    if (this.open) renderAuditLog();
+  });
+
+  /* ---------- 根拠資料（構造化文献管理。端末内保存・任意。診断ロジックには反映しない） ---------- */
+  async function renderEvidenceList(){
+    const list = document.getElementById('evidenceList');
+    const items = await EvidenceRepo.listAll();
+    if (items.length === 0) {
+      list.innerHTML = '<p class="desc">登録された文献はまだありません。</p>';
+      return;
+    }
+    list.innerHTML = items.map(it => `
+      <div class="cause-card" style="margin-top:10px;">
+        <h4 style="font-size:.88rem;">${it.title || '(タイトル未入力)'} ${it.verified ? '<span class="tag safe">確認済み</span>' : '<span class="tag na">未確認</span>'}</h4>
+        <ul style="font-size:.82rem;">
+          ${it.authors ? `<li>著者・発行: ${it.authors}${it.year ? '（' + it.year + '）' : ''}</li>` : ''}
+          ${it.url ? `<li>出典: ${it.url}</li>` : ''}
+          ${it.studyDesign ? `<li>研究デザイン: ${it.studyDesign}</li>` : ''}
+          ${it.population ? `<li>対象集団: ${it.population}</li>` : ''}
+          ${it.keyFindings ? `<li>主な知見: ${it.keyFindings}</li>` : ''}
+          ${it.limitations ? `<li>限界: ${it.limitations}</li>` : ''}
+          ${it.linkedRule ? `<li>関連ルール: ${it.linkedRule}</li>` : ''}
+        </ul>
+        <button type="button" class="secondary evidence-del-btn" data-id="${it.id}" style="padding:2px 8px;font-size:.75rem;">削除</button>
+      </div>`).join('');
+    list.querySelectorAll('.evidence-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await EvidenceRepo.remove(btn.dataset.id);
+        renderEvidenceList();
+      });
+    });
+  }
+  document.getElementById('addEvidenceBtn').addEventListener('click', async () => {
+    const title = document.getElementById('evTitle').value.trim();
+    if (!title) { alert('タイトルを入力してください。'); return; }
+    await EvidenceRepo.create({
+      title,
+      authors: document.getElementById('evAuthors').value.trim(),
+      year: document.getElementById('evYear').value ? parseInt(document.getElementById('evYear').value, 10) : null,
+      url: document.getElementById('evUrl').value.trim(),
+      studyDesign: document.getElementById('evDesign').value.trim(),
+      population: document.getElementById('evPopulation').value.trim(),
+      keyFindings: document.getElementById('evFindings').value.trim(),
+      limitations: document.getElementById('evLimitations').value.trim(),
+      linkedRule: document.getElementById('evLinkedRule').value,
+      verified: document.getElementById('evVerified').checked
+    });
+    ['evTitle','evAuthors','evYear','evUrl','evDesign','evPopulation','evFindings','evLimitations'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('evLinkedRule').value = '';
+    document.getElementById('evVerified').checked = false;
+    renderEvidenceList();
+  });
+  document.getElementById('evidenceNotesWrap').addEventListener('toggle', function(){
+    if (this.open) renderEvidenceList();
+  });
+
+  /* ---------- 初期化 ---------- */
+  (async function initDataLayer(){
+    await migrateFromLocalStorageIfNeeded();
+    await checkLockOnLoad();
+    await updateDataStatusLine();
+    await updateLockStatusLine();
+  })();
 
 })();
 </script>
