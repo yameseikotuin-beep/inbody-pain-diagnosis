@@ -885,6 +885,10 @@
       <h3 style="margin-top:24px;font-size:.95rem;">痛みとの関連要因分析</h3>
       <div id="causeWrap"></div>
 
+      <h3 style="margin-top:24px;font-size:.95rem;">統合的な考察</h3>
+      <p class="desc">InBody計測・問診・姿勢評価・動作/可動域評価という異なる評価方法の間で、観察結果に重なりがあるかどうかを機械的に突き合わせたものです。これ自体が新しい診断や因果関係の判定を行うものではなく、どこに注目して追加評価を進めるかを検討する際の参考情報です。</p>
+      <div id="integratedAnalysisWrap"></div>
+
       <h3 style="margin-top:24px;font-size:.95rem;">推奨アクション</h3>
       <ul class="rec-list" id="recList"></ul>
 
@@ -2745,6 +2749,12 @@
       });
     }
 
+    // ---- 統合的な考察（InBody・問診・姿勢・動作/可動域の既存データを突き合わせるのみ） ----
+    const integrated = buildIntegratedAnalysis({
+      causeData, painAreas, postureData, movementData, romData, muscleData, chiefComplaintCategories, redFlags
+    });
+    renderIntegratedAnalysis(integrated);
+
     // ---- recommendations ----
     const recs = buildRecommendations({worst, visceral, bmi, smm, weight, gender, intensity, duration, armAsym, legAsym});
     const recList = document.getElementById('recList');
@@ -2761,7 +2771,7 @@
         evalBMI: evals[0].result, evalPBF: evals[1].result,
         evalVisceral: evals[2].result, evalSMM: evals[3].result
       }),
-      painAreas, recs
+      painAreas, recs, integrated
     );
 
     // ---- 過去の測定結果との比較（患者名が入力済みで、過去の記録がある場合のみ。IndexedDB読み込みのため非同期） ----
@@ -2807,6 +2817,134 @@
   };
 
   const UNKNOWN_DISCLAIMER = 'InBodyの体組成データだけでは、特定の筋肉・関節・神経の機能異常や、構造的な疾患（椎間板ヘルニア、関節症など）の有無は判断できません。痛みの原因の特定には、問診・視診・触診・徒手検査などの身体評価が必要です。';
+
+  // 主訴（Step3で選ぶカテゴリ）と、関連要因分析に使う「痛みの部位」チップとの対応表。
+  // 一致しているかどうかの確認のみに使い、自動で部位を補完することはしない
+  const CHIEF_COMPLAINT_TO_PAIN_AREA = {
+    '腰痛': '腰', '肩こり': '肩', '肩関節痛': '肩', '首の痛み': '首',
+    '膝の痛み': '膝', '股関節痛': '股関節', '背中の痛み': '背中'
+  };
+
+  /* ---------- 統合的な考察（Stage4） ----------
+   * InBody / 問診 / 姿勢評価 / 動作・可動域評価という既に個別に表示されている検証済みデータを
+   * 突き合わせるだけの純粋関数。ここで新しい医学的機序やエビデンスを生成することはしない。
+   * ・未評価／未入力の項目は「所見なし」として扱い、欠落を「異常なし」と混同しない
+   * ・すべて「〜の可能性があります」「確認が必要です」等、非断定的な表現のみを用いる
+   */
+  function buildIntegratedAnalysis(ctx){
+    const { causeData, painAreas, postureData, movementData, romData, muscleData, chiefComplaintCategories, redFlags } = ctx;
+    const common = [];
+    const painRelated = [];
+    const toConfirm = [];
+    const future = [];
+    const DEVIATION = ['軽度の偏位', '中等度の偏位', '高度の偏位'];
+    const hasAnyPosture = Object.keys(postureData).length > 0;
+    const hasAnyMovement = Object.keys(movementData).length > 0 || Object.keys(romData).length > 0 || Object.keys(muscleData).length > 0;
+
+    // --- A. 複数の評価で共通して確認された特徴（左右差の一致） ---
+    const inbodySideParts = [];
+    if (causeData.armAsym && causeData.armAsym.diffPct >= 1) inbodySideParts.push('腕（部位別筋肉量）');
+    if (causeData.legAsym && causeData.legAsym.diffPct >= 1) inbodySideParts.push('脚（部位別筋肉量）');
+
+    const postureSideFindings = [];
+    Object.entries(postureData).forEach(([view, items]) => {
+      Object.entries(items).forEach(([label, val]) => {
+        if (label !== '所見' && label.includes('左右') && DEVIATION.includes(val)) {
+          postureSideFindings.push(`${view}の${label}（${val}）`);
+        }
+      });
+    });
+    const movementSideFindings = Object.entries(movementData)
+      .filter(([, f]) => f.sideDiff === 'あり').map(([m]) => m);
+
+    const sideSourceCount = (inbodySideParts.length ? 1 : 0) + (postureSideFindings.length ? 1 : 0) + (movementSideFindings.length ? 1 : 0);
+    if (sideSourceCount >= 2) {
+      const parts = [];
+      if (inbodySideParts.length) parts.push(`体組成データ（${inbodySideParts.join('・')}の左右差）`);
+      if (postureSideFindings.length) parts.push(`姿勢評価（${postureSideFindings.join('、')}）`);
+      if (movementSideFindings.length) parts.push(`動作評価（${movementSideFindings.join('、')}で左右差あり）`);
+      common.push(`${parts.join('と')}の、異なる評価方法の間で、いずれも左右差に関する所見が確認されています。同一の原因によるものかどうかは本データのみでは判断できませんが、複数の評価方法にまたがって一致して観察された点として記録します。`);
+    }
+
+    // --- A. 内臓脂肪・BMI高値と、姿勢の骨盤/腰椎系所見の併存（機序ではなく「所見の併存」のみを述べる） ---
+    const pelvicPostureFindings = [];
+    Object.entries(postureData).forEach(([view, items]) => {
+      ['骨盤の前傾・後傾傾向', '腰椎の前弯傾向', '骨盤の高さの左右差', '骨盤の左右差'].forEach(label => {
+        if (items[label] && DEVIATION.includes(items[label])) pelvicPostureFindings.push(`${view}の${label}（${items[label]}）`);
+      });
+    });
+    if ((causeData.visceral !== null && causeData.visceral >= 7 || causeData.bmi !== null && causeData.bmi >= 25) && pelvicPostureFindings.length > 0) {
+      common.push(`体組成データ（内臓脂肪レベルまたはBMIがやや高め）と、姿勢評価での所見（${pelvicPostureFindings.join('、')}）が併存しています。両者の間に直接的な因果関係があるかは現時点では判断できませんが、あわせて経過を確認することを検討してください。`);
+    }
+
+    // --- B. 痛みと関連する可能性のある要素（個別に観察された所見。一般的関連の機序は各部位のB区分を参照） ---
+    const paintfulMovements = Object.entries(movementData).filter(([, f]) => f.pain === 'あり').map(([m]) => m);
+    if (paintfulMovements.length) {
+      painRelated.push(`動作評価で痛みが確認された動作：${paintfulMovements.join('、')}（施術者向けレポートの各部位「B. 痛みとの関連が一般的に指摘される要因」とあわせてご確認ください）`);
+    }
+    const deviatedPosture = [];
+    Object.entries(postureData).forEach(([view, items]) => {
+      Object.entries(items).forEach(([label, val]) => {
+        if (label !== '所見' && DEVIATION.includes(val)) deviatedPosture.push(`${view}の${label}（${val}）`);
+      });
+    });
+    if (deviatedPosture.length) {
+      painRelated.push(`姿勢評価で偏位が確認された項目：${deviatedPosture.join('、')}`);
+    }
+    const loweredMuscles = Object.entries(muscleData).filter(([, v]) => v.grade === '低下' || v.grade === 'やや低下').map(([m, v]) => `${m}（${v.grade}）`);
+    if (loweredMuscles.length) {
+      painRelated.push(`筋機能評価で低下傾向が確認された筋・筋群：${loweredMuscles.join('、')}`);
+    }
+    if (painRelated.length === 0) {
+      painRelated.push('問診・姿勢評価・動作評価の中で、個別に痛みとの関連が疑われる所見は記録されていません（評価が未実施の項目は「所見なし」ではなく「未実施」です）。');
+    }
+
+    // --- C. 追加で確認すべき事項 ---
+    if (redFlags && redFlags.length > 0) {
+      toConfirm.push('危険信号（レッドフラグ）に該当する項目があります。他の評価結果にかかわらず、医療機関への受診を優先してください。');
+    }
+    (chiefComplaintCategories || []).forEach(cat => {
+      const expectedArea = CHIEF_COMPLAINT_TO_PAIN_AREA[cat];
+      if (expectedArea && !painAreas.includes(expectedArea)) {
+        toConfirm.push(`主訴として「${cat}」が選択されていますが、関連要因分析の「痛みの部位」で「${expectedArea}」が選択されていません。入力もれでないかご確認ください。`);
+      }
+    });
+    if (!hasAnyPosture) toConfirm.push('姿勢評価がまだ実施されていません。実施することで追加の所見が得られる可能性があります。');
+    if (!hasAnyMovement) toConfirm.push('動作・可動域評価がまだ実施されていません。実施することで追加の所見が得られる可能性があります。');
+    const cSet = new Set();
+    painAreas.forEach(area => (ADDITIONAL_ASSESSMENT_ITEMS[area] || []).forEach(c => cSet.add(c)));
+    if (cSet.size) toConfirm.push(`部位別に確認が推奨される評価項目：${Array.from(cSet).join('、')}`);
+
+    // --- D. 今後の評価・施術方針の検討材料 ---
+    if (sideSourceCount >= 2) {
+      future.push('複数の評価で一致して確認された左右差について、その側を中心とした追加評価・施術方針の検討材料とすることが考えられます。');
+    }
+    if (loweredMuscles.length) {
+      future.push(`筋機能が低下傾向にある筋・筋群（${loweredMuscles.map(s => s.split('（')[0]).join('、')}）について、個別の筋力評価やトレーニングの要否を検討してください。`);
+    }
+    const romDiffs = Object.entries(romData)
+      .filter(([, v]) => v.right !== undefined && v.left !== undefined && Math.abs(v.right - v.left) >= 5)
+      .map(([j, v]) => `${j}（右${v.right}度・左${v.left}度、差${Math.abs(v.right - v.left)}度）`);
+    if (romDiffs.length) {
+      future.push(`関節可動域の左右差が比較的大きい関節が記録されています：${romDiffs.join('、')}。可動域の左右差が妥当な範囲かどうか、継続して評価することを検討してください。`);
+    }
+    if (future.length === 0) {
+      future.push('現時点のデータからは、特に優先すべき検討材料は見つかっていません。引き続き定期的な評価を継続してください。');
+    }
+
+    return { common, painRelated, toConfirm, future };
+  }
+
+  function renderIntegratedAnalysis(result){
+    const wrap = document.getElementById('integratedAnalysisWrap');
+    const section = (label, arr, noneText) => `<div class="finding-section"><h5>${label}</h5>` +
+      (arr.length ? `<ul>${arr.map(t => `<li>${t}</li>`).join('')}</ul>` : `<p class="none">${noneText}</p>`) + `</div>`;
+    wrap.innerHTML =
+      section('複数の評価で共通して確認された特徴', result.common, '複数の評価方法にまたがって一致する所見は、現時点では確認されていません。') +
+      section('痛みと関連する可能性のある要素（個別の観察所見）', result.painRelated, '') +
+      section('追加で確認すべき事項', result.toConfirm, '特にありません。') +
+      section('今後の評価・施術方針の検討材料', result.future, '');
+  }
 
   // 部位ごとの判定結果（事実A・一般的関連B）を計算する純粋な関数。
   // 施術者向けカード（renderCauseCard）と患者向け文章（buildPatientCauseSummary）の
@@ -2997,7 +3135,7 @@
     return wrap;
   }
 
-  function renderPatientView(d, painAreas, recs){
+  function renderPatientView(d, painAreas, recs, integrated){
     const el = document.getElementById('patientView');
     el.innerHTML = '';
 
@@ -3032,6 +3170,12 @@
       painAreas.forEach(area => causeSection.appendChild(buildPatientCauseSummary(area, d)));
     }
     el.appendChild(section('痛みとの関連が考えられる要因（参考情報です）', causeSection));
+
+    // 3.5 複数の評価から見えてきたこと（統合的な考察・患者向け簡易版）
+    if (integrated && integrated.common.length > 0) {
+      const intHtml = `<ul>${integrated.common.map(t => `<li>${t}</li>`).join('')}</ul>`;
+      el.appendChild(section('複数の評価から共通して見えてきたこと', intHtml));
+    }
 
     // 4. 現時点で確認できていないこと
     el.appendChild(section('現時点で確認できていないこと',
