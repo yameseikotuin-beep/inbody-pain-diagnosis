@@ -784,6 +784,50 @@
     </div>
   </section>
 
+  <!-- STEP 5: 姿勢評価 -->
+  <section class="panel">
+    <h2><span class="step">5</span>姿勢評価（観察所見・任意）</h2>
+    <p class="desc">姿勢の観察所見を記録します。未評価のまま保存しても構いません（未測定の項目を推測で入力しないでください）。姿勢の所見だけで痛みの原因を断定するものではありません。</p>
+    <div id="postureAssessmentWrap"></div>
+
+    <h3 style="font-size:.9rem;margin-top:20px;">姿勢写真（任意・端末内保存）</h3>
+    <p class="desc">正面・側面・後面の写真を登録できます。画像はこの端末（IndexedDB）にのみ保存され、外部には送信されません。保存時に縮小処理を行い、容量を抑えます。</p>
+    <div class="grid">
+      <div class="field"><label for="postureImgFront">正面</label><input type="file" id="postureImgFront" accept="image/*"></div>
+      <div class="field"><label for="postureImgSide">側面</label><input type="file" id="postureImgSide" accept="image/*"></div>
+      <div class="field"><label for="postureImgBack">後面</label><input type="file" id="postureImgBack" accept="image/*"></div>
+    </div>
+    <div class="field" style="max-width:260px;margin-top:10px;">
+      <label for="postureEvaluator">評価者</label>
+      <input type="text" id="postureEvaluator" placeholder="例: 山田">
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button type="button" id="savePostureImagesBtn" class="secondary">選択した写真を保存</button>
+    </div>
+    <p id="postureImageStatus" class="desc" style="margin-top:6px;"></p>
+    <details id="postureGalleryWrap" style="margin-top:10px;">
+      <summary>保存済みの姿勢写真を見る</summary>
+      <div id="postureGalleryContent" style="margin-top:10px;"></div>
+    </details>
+  </section>
+
+  <!-- STEP 6: 動作・可動域評価 -->
+  <section class="panel">
+    <h2><span class="step">6</span>動作・可動域評価（任意）</h2>
+    <p class="desc">実際に確認した動作・可動域のみを記録してください。測定していない項目は未評価のままで構いません。</p>
+
+    <h3 style="font-size:.9rem;">基本動作評価</h3>
+    <div id="movementAssessmentWrap"></div>
+
+    <h3 style="font-size:.9rem;margin-top:20px;">関節可動域（角度・左右別）</h3>
+    <p class="desc">角度（度）を入力してください。測定していない関節は空欄のままにしてください。</p>
+    <div id="romAssessmentWrap"></div>
+
+    <h3 style="font-size:.9rem;margin-top:20px;">筋機能評価（実施した場合のみ）</h3>
+    <p class="desc">InBodyの筋肉量から個別の筋肉の筋力・機能を推定しないでください。実際に徒手検査等で確認した結果のみを記録します。</p>
+    <div id="muscleFunctionWrap"></div>
+  </section>
+
   <button id="diagnoseBtn">この内容で診断する</button>
 
   <!-- RESULTS -->
@@ -831,6 +875,12 @@
 
       <h3 style="margin-top:24px;font-size:.95rem;">問診内容</h3>
       <div id="intakeWrap"></div>
+
+      <h3 style="margin-top:24px;font-size:.95rem;">姿勢評価（観察所見）</h3>
+      <div id="postureReportWrap"></div>
+
+      <h3 style="margin-top:24px;font-size:.95rem;">動作・可動域評価</h3>
+      <div id="movementReportWrap"></div>
 
       <h3 style="margin-top:24px;font-size:.95rem;">痛みとの関連要因分析</h3>
       <div id="causeWrap"></div>
@@ -2132,6 +2182,254 @@
     return result;
   }
 
+  /* ---------- Step 5: 姿勢評価 ---------- */
+  const POSTURE_ITEMS = {
+    '正面': ['頭部の傾き', '肩の高さの左右差', '骨盤の高さの左右差', '膝の向き', '足部の向き', '左右の荷重バランス'],
+    '側面': ['頭部前方位', '肩の位置', '胸椎の後弯傾向', '腰椎の前弯傾向', '骨盤の前傾・後傾傾向', '膝の過伸展傾向', '重心位置'],
+    '後面': ['頭部の傾き', '肩甲骨の高さ・位置', '背骨の左右偏位', '骨盤の左右差', '下肢のアライメント', '足部の左右差']
+  };
+  const POSTURE_GRADE_OPTIONS = ['未評価', '正常範囲', '軽度の偏位', '中等度の偏位', '高度の偏位'];
+
+  function renderPostureAssessmentPanel(){
+    const wrap = document.getElementById('postureAssessmentWrap');
+    wrap.innerHTML = Object.entries(POSTURE_ITEMS).map(([view, items]) => {
+      const rows = items.map(label => {
+        const key = `${view}::${label}`;
+        return `<div class="field"><label>${label}</label>
+          <select data-posture-field="${key}">
+            ${POSTURE_GRADE_OPTIONS.map(g => `<option value="${g === '未評価' ? '' : g}">${g}</option>`).join('')}
+          </select></div>`;
+      }).join('');
+      return `<fieldset style="margin-top:12px;"><legend>${view}</legend><div class="grid">${rows}</div>
+        <div class="field" style="margin-top:10px;"><label>${view}の所見（自由記述）</label>
+        <textarea rows="2" data-posture-note="${view}" placeholder="評価者の所見を記入してください"></textarea></div></fieldset>`;
+    }).join('');
+  }
+  renderPostureAssessmentPanel();
+
+  function collectPostureAssessment(){
+    const result = {};
+    Object.entries(POSTURE_ITEMS).forEach(([view, items]) => {
+      const viewResult = {};
+      items.forEach(label => {
+        const el = document.querySelector(`[data-posture-field="${view}::${label}"]`);
+        if (el && el.value) viewResult[label] = el.value; // 未評価（空）は保存しない
+      });
+      const noteEl = document.querySelector(`[data-posture-note="${view}"]`);
+      const note = noteEl ? noteEl.value.trim() : '';
+      if (note) viewResult['所見'] = note;
+      if (Object.keys(viewResult).length > 0) result[view] = viewResult;
+    });
+    return result;
+  }
+
+  /* ---------- 姿勢写真（端末内のIndexedDBにBlobとして保存） ---------- */
+  const POSTURE_IMAGE_VIEWS = {front: '正面', side: '側面', back: '後面'};
+
+  const PostureImageRepo = {
+    async listByPatient(patientId){
+      const all = await dbGetAllByIndex('postureImages', 'patientId', patientId);
+      return all.sort((a, b) => new Date(b.date) - new Date(a.date));
+    },
+    async create(patientId, view, blob, evaluator){
+      const now = new Date().toISOString();
+      const rec = { id: genId(), patientId, view, evaluator: evaluator || '', date: now, createdAt: now, schemaVersion: SCHEMA_VERSION, blob };
+      await dbPut('postureImages', rec);
+      return rec;
+    },
+    async remove(id){ await dbDelete('postureImages', id); }
+  };
+
+  // 画像を縮小してからBlobとして保存し、容量とEXIF位置情報等の付随情報を抑える
+  function resizeImageFileToBlob(file, maxDim){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w >= h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('画像の変換に失敗しました')), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('画像を読み込めませんでした')); };
+      img.src = url;
+    });
+  }
+
+  document.getElementById('savePostureImagesBtn').addEventListener('click', async () => {
+    const status = document.getElementById('postureImageStatus');
+    const name = patientNameInput.value.trim();
+    if (!name) { status.textContent = '患者名を入力してください（ステップ1）。'; return; }
+    const files = {
+      front: document.getElementById('postureImgFront').files[0],
+      side: document.getElementById('postureImgSide').files[0],
+      back: document.getElementById('postureImgBack').files[0]
+    };
+    if (!files.front && !files.side && !files.back) { status.textContent = '保存する写真を選択してください。'; return; }
+    status.textContent = '保存中…';
+    let patient = await PatientRepo.findByName(name);
+    if (!patient) patient = await PatientRepo.create(name);
+    const evaluator = document.getElementById('postureEvaluator').value.trim();
+    let saved = 0;
+    for (const view of Object.keys(files)) {
+      if (!files[view]) continue;
+      try {
+        const blob = await resizeImageFileToBlob(files[view], 1200);
+        await PostureImageRepo.create(patient.id, POSTURE_IMAGE_VIEWS[view], blob, evaluator);
+        saved++;
+      } catch (e) { console.error(e); }
+    }
+    await AuditRepo.append('save', name, `姿勢写真を保存（${saved}枚）`);
+    status.textContent = `${saved}枚の写真を保存しました。`;
+    ['postureImgFront', 'postureImgSide', 'postureImgBack'].forEach(id => { document.getElementById(id).value = ''; });
+    if (document.getElementById('postureGalleryWrap').open) renderPostureGallery(name);
+  });
+
+  async function renderPostureGallery(name){
+    const content = document.getElementById('postureGalleryContent');
+    content.innerHTML = '';
+    if (!name) { content.innerHTML = '<p class="desc">ステップ1で患者名を入力してください。</p>'; return; }
+    const patient = await PatientRepo.findByName(name);
+    if (!patient) { content.innerHTML = '<p class="desc">保存済みの写真はまだありません。</p>'; return; }
+    const images = await PostureImageRepo.listByPatient(patient.id);
+    if (images.length === 0) { content.innerHTML = '<p class="desc">保存済みの写真はまだありません。</p>'; return; }
+    const grid = document.createElement('div');
+    grid.style.display = 'grid';
+    grid.style.gridTemplateColumns = 'repeat(auto-fill,minmax(140px,1fr))';
+    grid.style.gap = '12px';
+    images.forEach(img => {
+      const url = URL.createObjectURL(img.blob);
+      const cell = document.createElement('div');
+      cell.innerHTML = `<img src="${url}" style="width:100%;border-radius:6px;border:1px solid var(--border);display:block;">
+        <p class="desc" style="margin:4px 0 0;">${img.view}・${formatDateOnly(img.date)}${img.evaluator ? '（' + img.evaluator + '）' : ''}</p>
+        <button type="button" class="secondary posture-img-del" data-id="${img.id}" style="padding:2px 8px;font-size:.75rem;margin-top:4px;">削除</button>`;
+      grid.appendChild(cell);
+    });
+    content.appendChild(grid);
+    content.querySelectorAll('.posture-img-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('この写真を削除します。よろしいですか？')) return;
+        await PostureImageRepo.remove(btn.dataset.id);
+        await AuditRepo.append('delete', name, '姿勢写真を1枚削除');
+        renderPostureGallery(name);
+      });
+    });
+  }
+  document.getElementById('postureGalleryWrap').addEventListener('toggle', function(){
+    if (this.open) renderPostureGallery(patientNameInput.value.trim());
+  });
+
+  /* ---------- Step 6: 動作・可動域評価 ---------- */
+  const MOVEMENT_LIST = ['前屈', '後屈', '左右側屈', '左右回旋', 'しゃがみ込み', '片脚立位', '歩行', '立ち上がり'];
+
+  function renderMovementAssessmentPanel(){
+    const wrap = document.getElementById('movementAssessmentWrap');
+    wrap.innerHTML = MOVEMENT_LIST.map(m => `
+      <fieldset style="margin-top:12px;"><legend>${m}</legend>
+        <div class="grid">
+          <div class="field"><label>動作の可否</label>
+            <select data-mv-field="${m}::ability">
+              <option value="">未評価</option><option value="可">可</option>
+              <option value="一部制限">一部制限</option><option value="不可">不可</option>
+            </select></div>
+          <div class="field"><label>痛みの有無</label>
+            <select data-mv-field="${m}::pain">
+              <option value="">未評価</option><option value="あり">あり</option><option value="なし">なし</option>
+            </select></div>
+          <div class="field"><label>左右差</label>
+            <select data-mv-field="${m}::sideDiff">
+              <option value="">未評価</option><option value="あり">あり</option><option value="なし">なし</option>
+            </select></div>
+        </div>
+        <div class="grid" style="margin-top:10px;">
+          <div class="field"><label>可動域・動作範囲</label><input type="text" data-mv-field="${m}::rom" placeholder="例: 指先が床から10cm"></div>
+          <div class="field"><label>痛みの部位</label><input type="text" data-mv-field="${m}::painSite"></div>
+          <div class="field"><label>代償動作</label><input type="text" data-mv-field="${m}::compensation"></div>
+        </div>
+        <div class="field" style="margin-top:10px;"><label>動作時の違和感・評価者のコメント</label>
+          <textarea rows="2" data-mv-field="${m}::comment"></textarea></div>
+      </fieldset>`).join('');
+  }
+  renderMovementAssessmentPanel();
+
+  function collectMovementAssessment(){
+    const result = {};
+    MOVEMENT_LIST.forEach(m => {
+      const fields = ['ability', 'pain', 'sideDiff', 'rom', 'painSite', 'compensation', 'comment'];
+      const entry = {};
+      fields.forEach(f => {
+        const el = document.querySelector(`[data-mv-field="${m}::${f}"]`);
+        const v = el ? el.value.trim() : '';
+        if (v) entry[f] = v;
+      });
+      if (Object.keys(entry).length > 0) result[m] = entry;
+    });
+    return result;
+  }
+
+  const ROM_JOINTS = ['頸椎', '肩関節', '胸椎', '腰椎', '股関節', '膝関節', '足関節'];
+  function renderROMAssessmentPanel(){
+    const wrap = document.getElementById('romAssessmentWrap');
+    wrap.innerHTML = `<div class="table-scroll"><table style="width:100%;font-size:.85rem;">
+      <thead><tr><th>関節</th><th>右（度）</th><th>左（度）</th></tr></thead>
+      <tbody>${ROM_JOINTS.map(j => `<tr>
+        <td>${j}</td>
+        <td><input type="number" style="width:80px;" data-rom-field="${j}::right"></td>
+        <td><input type="number" style="width:80px;" data-rom-field="${j}::left"></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  renderROMAssessmentPanel();
+
+  function collectROMAssessment(){
+    const result = {};
+    ROM_JOINTS.forEach(j => {
+      const r = document.querySelector(`[data-rom-field="${j}::right"]`).value;
+      const l = document.querySelector(`[data-rom-field="${j}::left"]`).value;
+      const entry = {};
+      if (r !== '') entry.right = parseFloat(r);
+      if (l !== '') entry.left = parseFloat(l);
+      if (Object.keys(entry).length > 0) result[j] = entry;
+    });
+    return result;
+  }
+
+  const MUSCLE_FUNCTION_LIST = ['腹部・体幹', '腸腰筋', '臀筋群', '大腿四頭筋', 'ハムストリングス', '肩甲骨周囲筋'];
+  function renderMuscleFunctionPanel(){
+    const wrap = document.getElementById('muscleFunctionWrap');
+    wrap.innerHTML = `<div class="table-scroll"><table style="width:100%;font-size:.85rem;">
+      <thead><tr><th>筋・筋群</th><th>評価</th><th>所見</th></tr></thead>
+      <tbody>${MUSCLE_FUNCTION_LIST.map(m => `<tr>
+        <td>${m}</td>
+        <td><select data-mf-field="${m}::grade">
+          <option value="">未評価</option><option value="正常">正常</option>
+          <option value="やや低下">やや低下</option><option value="低下">低下</option>
+        </select></td>
+        <td><input type="text" data-mf-field="${m}::note" style="width:100%;"></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  renderMuscleFunctionPanel();
+
+  function collectMuscleFunctionAssessment(){
+    const result = {};
+    MUSCLE_FUNCTION_LIST.forEach(m => {
+      const grade = document.querySelector(`[data-mf-field="${m}::grade"]`).value;
+      const note = document.querySelector(`[data-mf-field="${m}::note"]`).value.trim();
+      const entry = {};
+      if (grade) entry.grade = grade;
+      if (note) entry.note = note;
+      if (Object.keys(entry).length > 0) result[m] = entry;
+    });
+    return result;
+  }
+
   /* ---------- Step 4: diagnosis ---------- */
   const diagnoseBtn = document.getElementById('diagnoseBtn');
   diagnoseBtn.addEventListener('click', runDiagnosis);
@@ -2394,6 +2692,43 @@
       }).join('');
     }
     intakeWrap.innerHTML = intakeHtml;
+
+    // ---- 姿勢評価・動作/可動域評価の表示（未入力・未評価の項目は表示しない） ----
+    const postureData = collectPostureAssessment();
+    const postureReportWrap = document.getElementById('postureReportWrap');
+    const postureViews = Object.keys(postureData);
+    postureReportWrap.innerHTML = postureViews.length > 0
+      ? postureViews.map(view => {
+          const items = Object.entries(postureData[view]).map(([k, v]) => `<li>${k}：${v}</li>`).join('');
+          return `<h4 style="font-size:.85rem;margin:10px 0 4px;">${view}</h4><ul>${items}</ul>`;
+        }).join('')
+      : '<p class="desc">姿勢評価は入力されていません（任意項目です）。</p>';
+
+    const movementData = collectMovementAssessment();
+    const romData = collectROMAssessment();
+    const muscleData = collectMuscleFunctionAssessment();
+    const movementReportWrap = document.getElementById('movementReportWrap');
+    const MV_LABELS = {ability:'可否', pain:'痛み', sideDiff:'左右差', rom:'可動域', painSite:'痛みの部位', compensation:'代償動作', comment:'コメント'};
+    let movementHtml = '';
+    if (Object.keys(movementData).length > 0) {
+      movementHtml += '<h4 style="font-size:.85rem;margin:10px 0 4px;">基本動作評価</h4><ul>' +
+        Object.entries(movementData).map(([m, fields]) =>
+          `<li><strong>${m}：</strong>${Object.entries(fields).map(([k, v]) => `${MV_LABELS[k] || k}=${v}`).join('、')}</li>`
+        ).join('') + '</ul>';
+    }
+    if (Object.keys(romData).length > 0) {
+      movementHtml += '<h4 style="font-size:.85rem;margin:10px 0 4px;">関節可動域</h4><ul>' +
+        Object.entries(romData).map(([j, v]) =>
+          `<li>${j}：${v.right !== undefined ? '右' + v.right + '度 ' : ''}${v.left !== undefined ? '左' + v.left + '度' : ''}</li>`
+        ).join('') + '</ul>';
+    }
+    if (Object.keys(muscleData).length > 0) {
+      movementHtml += '<h4 style="font-size:.85rem;margin:10px 0 4px;">筋機能評価</h4><ul>' +
+        Object.entries(muscleData).map(([m, v]) =>
+          `<li>${m}：${v.grade || ''}${v.note ? '（' + v.note + '）' : ''}</li>`
+        ).join('') + '</ul>';
+    }
+    movementReportWrap.innerHTML = movementHtml || '<p class="desc">動作・可動域評価は入力されていません（任意項目です）。</p>';
 
     // ---- cause analysis per pain area ----
     const causeData = {
@@ -2753,7 +3088,7 @@
    * 大量の健康情報をlocalStorageに直接保存しない（構造化ローカルDBを使用する）。
    * ========================================================================= */
   const APP_DB_NAME = 'inbodyAppDB';
-  const APP_DB_VERSION = 1;
+  const APP_DB_VERSION = 2; // v2: postureImages ストアを追加（姿勢写真のBlob保存）
   const SCHEMA_VERSION = 1; // 各レコードのschemaVersionフィールドに埋め込むバージョン
 
   function openAppDB(){
@@ -2776,6 +3111,10 @@
         }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('postureImages')) {
+          const s = db.createObjectStore('postureImages', { keyPath: 'id' });
+          s.createIndex('patientId', 'patientId', { unique: false });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -2977,10 +3316,28 @@
   }
   function toBase64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
   function fromBase64(b64){ return Uint8Array.from(atob(b64), c => c.charCodeAt(0)); }
+  function blobToBase64(blob){
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]); // data:...;base64,XXXX の XXXX部分のみ
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+  function base64ToBlob(b64, mimeType){
+    return new Blob([fromBase64(b64)], { type: mimeType || 'image/jpeg' });
+  }
 
   async function exportEncryptedBackup(passphrase){
-    const [patients, visits, evidence] = await Promise.all([dbGetAll('patients'), dbGetAll('visits'), dbGetAll('evidence')]);
-    const payload = { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), patients, visits, evidence };
+    const [patients, visits, evidence, postureImagesRaw] = await Promise.all([
+      dbGetAll('patients'), dbGetAll('visits'), dbGetAll('evidence'), dbGetAll('postureImages')
+    ]);
+    const postureImages = await Promise.all(postureImagesRaw.map(async img => ({
+      id: img.id, patientId: img.patientId, view: img.view, evaluator: img.evaluator,
+      date: img.date, createdAt: img.createdAt, schemaVersion: img.schemaVersion,
+      mimeType: img.blob.type, dataBase64: await blobToBase64(img.blob)
+    })));
+    const payload = { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), patients, visits, evidence, postureImages };
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const key = await deriveKey(passphrase, salt);
@@ -3008,6 +3365,13 @@
     for (const p of (payload.patients || [])) await dbPut('patients', p);
     for (const v of (payload.visits || [])) await dbPut('visits', v);
     for (const e of (payload.evidence || [])) await dbPut('evidence', e);
+    for (const img of (payload.postureImages || [])) {
+      await dbPut('postureImages', {
+        id: img.id, patientId: img.patientId, view: img.view, evaluator: img.evaluator,
+        date: img.date, createdAt: img.createdAt, schemaVersion: img.schemaVersion,
+        blob: base64ToBlob(img.dataBase64, img.mimeType)
+      });
+    }
     return payload;
   }
 
@@ -3077,7 +3441,7 @@
       await AuditRepo.append('restore', '-', `復元（患者${(payload.patients||[]).length}件・記録${(payload.visits||[]).length}件）`);
       await updateDataStatusLine();
       await renderPatientList();
-      status.textContent = `復元しました（患者${(payload.patients||[]).length}件・記録${(payload.visits||[]).length}件・文献${(payload.evidence||[]).length}件）。`;
+      status.textContent = `復元しました（患者${(payload.patients||[]).length}件・記録${(payload.visits||[]).length}件・文献${(payload.evidence||[]).length}件・姿勢写真${(payload.postureImages||[]).length}枚）。`;
       status.style.color = 'var(--safe)';
     } catch (e) {
       console.error(e);
@@ -3187,7 +3551,11 @@
         painAreas, intensity: parseInt(painIntensity.value, 10), duration: document.getElementById('painDuration').value,
         chiefComplaintCategories: chiefComplaintCategoriesForSave,
         symptomSpecific: collectSymptomSpecificAnswers()
-      }
+      },
+      posture: collectPostureAssessment(),
+      movement: collectMovementAssessment(),
+      rom: collectROMAssessment(),
+      muscleFunction: collectMuscleFunctionAssessment()
     });
     const count = (await VisitRepo.listByPatient(patient.id)).length;
     await AuditRepo.append('save', name, `1件保存（合計${count}件）`);
