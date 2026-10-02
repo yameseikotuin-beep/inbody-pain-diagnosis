@@ -378,6 +378,36 @@
     #results{display:block !important;box-shadow:none;border:none;}
   }
 
+  /* ---- 専用PDFレポート（Stage5） ---- */
+  #pdfPreviewOverlay{
+    position:fixed;inset:0;background:rgba(15,23,42,.55);
+    display:none;align-items:center;justify-content:center;z-index:999;padding:16px;
+  }
+  #pdfPreviewBox{
+    background:#fff;border-radius:var(--radius);padding:16px;
+    width:min(900px,100%);max-height:92vh;display:flex;flex-direction:column;
+  }
+  #pdfLayoutRoot{
+    position:fixed;left:-99999px;top:0;width:740px;background:#fff;color:#111827;
+    padding:24px;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+  }
+  #pdfLayoutRoot .pdf-header{
+    display:flex;align-items:center;gap:14px;border-bottom:2px solid #1f2937;
+    padding-bottom:12px;margin-bottom:16px;
+  }
+  #pdfLayoutRoot .pdf-logo{max-height:56px;max-width:140px;object-fit:contain;}
+  #pdfLayoutRoot .pdf-clinic-name{font-size:16px;font-weight:700;}
+  #pdfLayoutRoot .pdf-report-title{font-size:13px;margin-top:2px;}
+  #pdfLayoutRoot .pdf-meta{font-size:11px;color:#4b5563;margin-top:4px;}
+  #pdfLayoutRoot .pdf-footer{
+    margin-top:20px;padding-top:10px;border-top:1px solid #d1d5db;
+    font-size:9.5px;color:#4b5563;line-height:1.6;
+  }
+  #pdfLayoutRoot .cause-card, #pdfLayoutRoot .finding-section,
+  #pdfLayoutRoot .pv-section, #pdfLayoutRoot fieldset{
+    page-break-inside:avoid;break-inside:avoid;
+  }
+
   footer{
     text-align:center;
     color:var(--muted);
@@ -474,6 +504,20 @@
           <button type="button" id="disableLockBtn" class="secondary">ロックを無効にする</button>
         </div>
       </div>
+    </details>
+
+    <details id="pdfSettingsWrap" style="margin-top:10px;">
+      <summary>PDFレポート設定（院名・ロゴ、任意・この端末にのみ保存）</summary>
+      <div class="grid" style="margin-top:8px;">
+        <div class="field"><label for="clinicNameInput">院名・施術者名</label><input type="text" id="clinicNameInput" placeholder="例: ○○整体院"></div>
+        <div class="field"><label for="clinicLogoInput">ロゴ画像（任意）</label><input type="file" id="clinicLogoInput" accept="image/*"></div>
+      </div>
+      <div id="clinicLogoPreview" style="margin-top:8px;"></div>
+      <div class="row" style="margin-top:8px;">
+        <button type="button" id="saveClinicSettingsBtn" class="secondary">設定を保存</button>
+        <button type="button" id="removeClinicLogoBtn" class="secondary">ロゴを削除</button>
+      </div>
+      <p id="clinicSettingsStatus" class="desc" style="margin-top:6px;"></p>
     </details>
   </section>
 
@@ -840,7 +884,9 @@
     <div class="view-toggle no-print">
       <button type="button" id="viewPractitionerBtn" class="view-btn active">施術者向け表示</button>
       <button type="button" id="viewPatientBtn" class="view-btn">患者向け表示</button>
-      <button type="button" id="printBtn" class="secondary">印刷・PDF保存</button>
+      <button type="button" id="pdfPatientBtn" class="secondary">患者向けPDFを作成</button>
+      <button type="button" id="pdfPractitionerBtn" class="secondary">施術者向けPDFを作成</button>
+      <button type="button" id="printBtn" class="secondary">印刷（ブラウザ機能）</button>
     </div>
 
     <div class="no-print" style="margin-top:14px;">
@@ -935,11 +981,29 @@
     <div id="patientView" style="display:none;"></div>
   </section>
 
+  <div id="pdfLayoutRoot" aria-hidden="true"></div>
+
+  <div id="pdfPreviewOverlay" class="no-print">
+    <div id="pdfPreviewBox">
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;">
+        <strong>PDFプレビュー</strong>
+        <div class="row">
+          <button type="button" id="pdfDownloadBtn" class="secondary">ダウンロード</button>
+          <button type="button" id="pdfCloseBtn" class="secondary">閉じる</button>
+        </div>
+      </div>
+      <p class="desc" id="pdfGenStatus" style="margin:6px 0;"></p>
+      <iframe id="pdfPreviewFrame" style="width:100%;height:70vh;border:1px solid var(--border);margin-top:8px;border-radius:6px;"></iframe>
+    </div>
+  </div>
+
 </main>
 
 <footer>InBody × 痛み因果診断アプリ &mdash; すべての処理はブラウザ内で完結します</footer>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -3989,12 +4053,163 @@
     if (this.open) renderEvidenceList();
   });
 
+  /* =========================================================================
+   * 専用PDFレポート生成（Stage5）
+   *
+   * ライブラリ選定: jsPDF + html2canvas（いずれもCDN配信・ビルド不要。既存の
+   * Tesseract.jsと同じ導入方式のため、依存関係の管理方法を増やさずに済む）。
+   *
+   * 選定理由: jsPDFの標準組み込みフォント（Helvetica等）は日本語グリフを
+   * 含まないため、テキストを直接描画する方式では日本語が文字化け・空白に
+   * なる。これを避けるには数MB規模の日本語フォントファイルをアプリに
+   * 同梱してjsPDFのVFSへ追加する必要があるが、本アプリは全文が日本語で
+   * あり、そのためだけに大きなフォント資産を追加・管理するコストは見合わない
+   * と判断した。代わりに、レポートのDOM（ブラウザ自身の日本語フォント
+   * レンダリングを利用）をhtml2canvasで画像化し、jsPDFでA4ページに貼り付ける
+   * 方式（jsPDFの.html()メソッドがhtml2canvasを内部的に利用する）を採用する。
+   *
+   * 制約（ユーザー向けにも明示する）:
+   * ・出力されるPDFの文字は画像であり、PDF内でのテキスト選択・検索はできない。
+   * ・改ページ位置はjsPDFのautoPaging機能に委ねており、要素によっては
+   *   意図しない位置で分割される場合がある（page-break-inside:avoidで
+   *   主要なブロック単位の分割はある程度防止しているが、完全ではない）。
+   * ・院名・ロゴはこの端末にのみ保存され、外部送信は行わない。
+   * ========================================================================= */
+  function blobToDataUrl(blob){
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function renderClinicLogoPreview(dataUrl){
+    document.getElementById('clinicLogoPreview').innerHTML = dataUrl
+      ? `<img src="${dataUrl}" style="max-height:60px;border:1px solid var(--border);border-radius:4px;">`
+      : '<p class="desc">ロゴは未設定です。</p>';
+  }
+
+  async function initClinicSettingsUI(){
+    document.getElementById('clinicNameInput').value = await MetaRepo.get('clinicName') || '';
+    renderClinicLogoPreview(await MetaRepo.get('clinicLogoDataUrl') || '');
+  }
+
+  document.getElementById('saveClinicSettingsBtn').addEventListener('click', async () => {
+    const status = document.getElementById('clinicSettingsStatus');
+    await MetaRepo.set('clinicName', document.getElementById('clinicNameInput').value.trim());
+    const file = document.getElementById('clinicLogoInput').files[0];
+    if (file) {
+      try {
+        const blob = await resizeImageFileToBlob(file, 300);
+        const dataUrl = await blobToDataUrl(blob);
+        await MetaRepo.set('clinicLogoDataUrl', dataUrl);
+        renderClinicLogoPreview(dataUrl);
+      } catch (e) {
+        status.textContent = 'ロゴ画像の読み込みに失敗しました：' + e.message;
+        return;
+      }
+    }
+    document.getElementById('clinicLogoInput').value = '';
+    status.textContent = '設定を保存しました。';
+  });
+  document.getElementById('removeClinicLogoBtn').addEventListener('click', async () => {
+    await MetaRepo.set('clinicLogoDataUrl', '');
+    renderClinicLogoPreview('');
+    document.getElementById('clinicSettingsStatus').textContent = 'ロゴを削除しました。';
+  });
+
+  let currentPdfBlob = null;
+  let currentPdfBlobUrl = null;
+
+  async function generatePdfReport(kind){
+    const overlay = document.getElementById('pdfPreviewOverlay');
+    const genStatus = document.getElementById('pdfGenStatus');
+    const frame = document.getElementById('pdfPreviewFrame');
+    overlay.style.display = 'flex';
+    frame.src = 'about:blank';
+    genStatus.textContent = 'PDFを作成しています…（データ量によって数秒かかる場合があります）';
+
+    if (!window.jspdf || !window.html2canvas) {
+      genStatus.textContent = 'PDF作成ライブラリの読み込みに失敗しました。インターネット接続を確認し、再読み込みしてください（CDNからライブラリを取得できない環境ではPDF作成機能は利用できません）。';
+      return;
+    }
+
+    const clinicName = await MetaRepo.get('clinicName') || '';
+    const clinicLogo = await MetaRepo.get('clinicLogoDataUrl') || '';
+    const patientName = patientNameInput.value.trim();
+    const sourceEl = kind === 'patient' ? document.getElementById('patientView') : document.getElementById('practitionerView');
+
+    const clone = sourceEl.cloneNode(true);
+    clone.querySelectorAll('.no-print').forEach(el => el.remove());
+    clone.querySelectorAll('input, select, textarea, button, details > summary').forEach(el => el.remove());
+    // 施術者向けクローンでは、入力フォームを除去した結果空になった<details>（根拠資料管理など）を除去
+    clone.querySelectorAll('details').forEach(d => { if (!d.textContent.trim()) d.remove(); });
+
+    const layout = document.getElementById('pdfLayoutRoot');
+    layout.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'pdf-header';
+    header.innerHTML = `
+      ${clinicLogo ? `<img src="${clinicLogo}" class="pdf-logo">` : ''}
+      <div>
+        <div class="pdf-clinic-name">${clinicName ? clinicName.replace(/</g, '&lt;') : ''}</div>
+        <div class="pdf-report-title">施術結果レポート（${kind === 'patient' ? '患者様向け' : '施術者向け'}）</div>
+        <div class="pdf-meta">患者名：${(patientName || '（未入力）').replace(/</g, '&lt;')}　作成日：${formatDateOnly(new Date().toISOString())}</div>
+      </div>`;
+    layout.appendChild(header);
+    layout.appendChild(clone);
+    const footer = document.createElement('div');
+    footer.className = 'pdf-footer';
+    footer.textContent = '本レポートはInBody計測値・問診・姿勢/動作評価所見に基づく参考情報であり、医学的診断ではありません。評価されていない項目は所見なしではなく未実施です。診断ロジックのバージョン: ' + RULESET_VERSION;
+    layout.appendChild(footer);
+
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      await doc.html(layout, {
+        margin: [12, 10, 12, 10],
+        autoPaging: 'text',
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        width: 190,
+        windowWidth: 740
+      });
+      currentPdfBlob = doc.output('blob');
+      if (currentPdfBlobUrl) URL.revokeObjectURL(currentPdfBlobUrl);
+      currentPdfBlobUrl = URL.createObjectURL(currentPdfBlob);
+      frame.src = currentPdfBlobUrl;
+      genStatus.textContent = '内容をご確認のうえ、問題なければ「ダウンロード」を押してください。';
+    } catch (e) {
+      console.error(e);
+      genStatus.textContent = 'PDFの作成に失敗しました：' + e.message;
+    } finally {
+      layout.innerHTML = '';
+    }
+  }
+
+  document.getElementById('pdfPatientBtn').addEventListener('click', () => generatePdfReport('patient'));
+  document.getElementById('pdfPractitionerBtn').addEventListener('click', () => generatePdfReport('practitioner'));
+  document.getElementById('pdfCloseBtn').addEventListener('click', () => {
+    document.getElementById('pdfPreviewOverlay').style.display = 'none';
+  });
+  document.getElementById('pdfDownloadBtn').addEventListener('click', () => {
+    if (!currentPdfBlob) return;
+    const a = document.createElement('a');
+    a.href = currentPdfBlobUrl;
+    const patientName = patientNameInput.value.trim() || '患者';
+    a.download = `${patientName}_施術結果レポート_${formatDateOnly(new Date().toISOString())}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+
   /* ---------- 初期化 ---------- */
   (async function initDataLayer(){
     await migrateFromLocalStorageIfNeeded();
     await checkLockOnLoad();
     await updateDataStatusLine();
     await updateLockStatusLine();
+    await initClinicSettingsUI();
   })();
 
 })();
