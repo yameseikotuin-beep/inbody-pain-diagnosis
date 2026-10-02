@@ -202,7 +202,7 @@
     color:var(--muted);
     margin-bottom:4px;
   }
-  .field input, .field select{
+  .field input, .field select, .field textarea{
     width:100%;
     padding:10px 10px;
     min-height:42px;
@@ -212,7 +212,8 @@
     font-size:16px;
     background:#fff;
   }
-  .field input:focus, .field select:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  .field textarea{resize:vertical;}
+  .field input:focus, .field select:focus, .field textarea:focus{outline:2px solid var(--accent);outline-offset:1px;}
 
   fieldset{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-top:14px;}
   fieldset legend{padding:0 6px;color:var(--muted);font-size:.8rem;}
@@ -344,6 +345,26 @@
     border:1px solid var(--border);
     border-radius:8px;
     padding:12px 14px;
+  }
+
+  .view-toggle{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;}
+  .view-btn{
+    padding:8px 14px;border-radius:7px;border:1px solid var(--border);
+    background:#fff;color:var(--text);font-size:.82rem;cursor:pointer;
+  }
+  .view-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+  #patientView .pv-section{margin-top:18px;}
+  #patientView h3{font-size:.95rem;margin-bottom:8px;}
+  #patientView p{font-size:.88rem;line-height:1.7;margin:0 0 6px;}
+  #patientView ul{font-size:.88rem;line-height:1.7;padding-left:20px;margin:0 0 6px;}
+  #patientView .pv-intro{color:var(--muted);font-size:.82rem;}
+
+  @media print{
+    .no-print, header, footer, button, .row, input, select, textarea,
+    section.panel:not(#results){display:none !important;}
+    body{background:#fff;}
+    #results{display:block !important;box-shadow:none;border:none;}
   }
 
   footer{
@@ -561,6 +582,54 @@
         <option value="chronic">3ヶ月以上（慢性）</option>
       </select>
     </div>
+
+    <details id="detailedIntakeWrap" style="margin-top:16px;">
+      <summary>詳しい問診（任意・施術者向けレポートに記載されます）</summary>
+      <div class="grid" style="margin-top:12px;">
+        <div class="field">
+          <label for="chiefComplaint">主訴</label>
+          <input type="text" id="chiefComplaint" placeholder="例: 朝起きた時の腰の痛み">
+        </div>
+        <div class="field">
+          <label for="onsetTrigger">発症のきっかけ</label>
+          <select id="onsetTrigger">
+            <option value="">選択してください</option>
+            <option value="trauma">外傷・事故（転倒・ぶつけた等）</option>
+            <option value="movement">特定の動作（持ち上げた・ひねった等）</option>
+            <option value="gradual">徐々に（きっかけ不明）</option>
+            <option value="other">その他</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="aggravatingMovement">痛みが出る・強くなる動作や姿勢</label>
+        <textarea id="aggravatingMovement" rows="2" placeholder="例: 長時間座った後に立ち上がる時"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="relievingFactor">痛みが軽減する条件</label>
+        <textarea id="relievingFactor" rows="2" placeholder="例: 温めると楽になる"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="dailyImpact">日常生活への影響</label>
+        <textarea id="dailyImpact" rows="2" placeholder="例: 長時間の立ち仕事がつらい"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="medicalHistory">既往歴・手術歴</label>
+        <textarea id="medicalHistory" rows="2" placeholder="例: 5年前に同部位の手術歴あり"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="medicationInfo">服薬情報（必要な範囲で）</label>
+        <textarea id="medicationInfo" rows="2" placeholder="例: 鎮痛剤を頓服で使用中"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="exerciseHabit">運動習慣</label>
+        <textarea id="exerciseHabit" rows="2" placeholder="例: 週2回ランニング"></textarea>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="occupationInfo">職業・生活動作（デスクワーク、重量物を扱う等）</label>
+        <textarea id="occupationInfo" rows="2" placeholder="例: デスクワーク中心、長時間同じ姿勢"></textarea>
+      </div>
+    </details>
   </section>
 
   <!-- STEP 4: 危険信号チェック -->
@@ -588,25 +657,38 @@
     <div id="redFlagBanner"></div>
     <div id="riskBadgeWrap"></div>
 
-    <h3 style="margin-top:20px;font-size:.95rem;">計測値の評価</h3>
-    <div class="table-scroll">
-      <table id="metricsTable">
-        <thead><tr><th>項目</th><th>値</th><th>評価</th><th>コメント</th></tr></thead>
-        <tbody id="metricsTbody"></tbody>
-      </table>
+    <div class="view-toggle no-print">
+      <button type="button" id="viewPractitionerBtn" class="view-btn active">施術者向け表示</button>
+      <button type="button" id="viewPatientBtn" class="view-btn">患者向け表示</button>
+      <button type="button" id="printBtn" class="secondary">印刷・PDF保存</button>
     </div>
 
-    <div id="balanceWrap"></div>
+    <div id="practitionerView">
+      <h3 style="margin-top:20px;font-size:.95rem;">計測値の評価</h3>
+      <div class="table-scroll">
+        <table id="metricsTable">
+          <thead><tr><th>項目</th><th>値</th><th>評価</th><th>コメント</th></tr></thead>
+          <tbody id="metricsTbody"></tbody>
+        </table>
+      </div>
 
-    <h3 style="margin-top:24px;font-size:.95rem;">痛みとの関連要因分析</h3>
-    <div id="causeWrap"></div>
+      <div id="balanceWrap"></div>
 
-    <h3 style="margin-top:24px;font-size:.95rem;">推奨アクション</h3>
-    <ul class="rec-list" id="recList"></ul>
+      <h3 style="margin-top:24px;font-size:.95rem;">問診内容</h3>
+      <div id="intakeWrap"></div>
 
-    <div class="disclaimer">
-      本アプリの診断結果は、InBody計測値と一般的な傾向に基づく<strong>参考情報</strong>であり、医学的診断ではありません。強い痛みや長引く症状がある場合は、整形外科・内科などの医療機関を受診してください。画像や入力データはすべてお使いのブラウザ内で処理され、外部サーバーへ送信されることはありません。
+      <h3 style="margin-top:24px;font-size:.95rem;">痛みとの関連要因分析</h3>
+      <div id="causeWrap"></div>
+
+      <h3 style="margin-top:24px;font-size:.95rem;">推奨アクション</h3>
+      <ul class="rec-list" id="recList"></ul>
+
+      <div class="disclaimer">
+        本アプリの診断結果は、InBody計測値と一般的な傾向に基づく<strong>参考情報</strong>であり、医学的診断ではありません。強い痛みや長引く症状がある場合は、整形外科・内科などの医療機関を受診してください。画像や入力データはすべてお使いのブラウザ内で処理され、外部サーバーへ送信されることはありません。
+      </div>
     </div>
+
+    <div id="patientView" style="display:none;"></div>
   </section>
 
 </main>
@@ -1843,6 +1925,19 @@
     const duration = document.getElementById('painDuration').value;
     const redFlags = Array.from(document.querySelectorAll('#redFlagChips input:checked')).map(c => c.value);
 
+    // ---- 詳しい問診（任意入力）。評価には使わず、施術者向けレポートにそのまま記載する ----
+    const intake = {
+      chiefComplaint: document.getElementById('chiefComplaint').value.trim(),
+      onsetTrigger: document.getElementById('onsetTrigger').value,
+      aggravatingMovement: document.getElementById('aggravatingMovement').value.trim(),
+      relievingFactor: document.getElementById('relievingFactor').value.trim(),
+      dailyImpact: document.getElementById('dailyImpact').value.trim(),
+      medicalHistory: document.getElementById('medicalHistory').value.trim(),
+      medicationInfo: document.getElementById('medicationInfo').value.trim(),
+      exerciseHabit: document.getElementById('exerciseHabit').value.trim(),
+      occupationInfo: document.getElementById('occupationInfo').value.trim()
+    };
+
     // ---- metric evaluations ----
     const evals = [
       {key:'BMI', value: bmi, unit:'', result: evalBMI(bmi)},
@@ -1912,29 +2007,57 @@
       if (legAsym) balanceWrap.appendChild(renderBalanceRow('脚', rleg, lleg, legAsym));
     }
 
+    // ---- 問診内容（評価には使わず、入力内容をそのまま記載） ----
+    const intakeWrap = document.getElementById('intakeWrap');
+    const ONSET_LABELS = {trauma:'外傷・事故', movement:'特定の動作', gradual:'徐々に（きっかけ不明）', other:'その他'};
+    const intakeRows = [
+      ['主訴', intake.chiefComplaint],
+      ['発症のきっかけ', ONSET_LABELS[intake.onsetTrigger] || ''],
+      ['痛みが出る・強くなる動作や姿勢', intake.aggravatingMovement],
+      ['痛みが軽減する条件', intake.relievingFactor],
+      ['日常生活への影響', intake.dailyImpact],
+      ['既往歴・手術歴', intake.medicalHistory],
+      ['服薬情報', intake.medicationInfo],
+      ['運動習慣', intake.exerciseHabit],
+      ['職業・生活動作', intake.occupationInfo]
+    ].filter(([, v]) => v);
+    intakeWrap.innerHTML = intakeRows.length
+      ? `<ul>${intakeRows.map(([k, v]) => `<li><strong>${k}：</strong>${v}</li>`).join('')}</ul>`
+      : '<p class="desc">詳しい問診は入力されていません（任意項目です）。</p>';
+
     // ---- cause analysis per pain area ----
+    const causeData = {
+      bmi, pbf, visceral, smm, weight, gender, trunk,
+      armAsym, legAsym, side, duration, intensity
+    };
     const causeWrap = document.getElementById('causeWrap');
     causeWrap.innerHTML = '';
     if (painAreas.length === 0) {
       causeWrap.innerHTML = '<p class="desc">痛みの部位が選択されていません。上のステップ3で該当部位を選択すると、関連要因の分析が表示されます。</p>';
     } else {
       painAreas.forEach(area => {
-        causeWrap.appendChild(renderCauseCard(area, {
-          bmi, pbf, visceral, smm, weight, gender, trunk,
-          armAsym, legAsym, side, duration, intensity
-        }));
+        causeWrap.appendChild(renderCauseCard(area, causeData));
       });
     }
 
     // ---- recommendations ----
+    const recs = buildRecommendations({worst, visceral, bmi, smm, weight, gender, intensity, duration, armAsym, legAsym});
     const recList = document.getElementById('recList');
     recList.innerHTML = '';
-    buildRecommendations({worst, visceral, bmi, smm, weight, gender, intensity, duration, armAsym, legAsym})
-      .forEach(r => {
-        const li = document.createElement('li');
-        li.textContent = r;
-        recList.appendChild(li);
-      });
+    recs.forEach(r => {
+      const li = document.createElement('li');
+      li.textContent = r;
+      recList.appendChild(li);
+    });
+
+    // ---- 患者向け表示の生成（同じ検証済みデータ・判定ロジックの再利用のみ。新たな評価はしない） ----
+    renderPatientView(
+      Object.assign({}, causeData, {
+        evalBMI: evals[0].result, evalPBF: evals[1].result,
+        evalVisceral: evals[2].result, evalSMM: evals[3].result
+      }),
+      painAreas, recs
+    );
 
     document.getElementById('results').style.display = 'block';
     document.getElementById('results').scrollIntoView({behavior:'smooth', block:'start'});
@@ -1977,7 +2100,10 @@
 
   const UNKNOWN_DISCLAIMER = 'InBodyの体組成データだけでは、特定の筋肉・関節・神経の機能異常や、構造的な疾患（椎間板ヘルニア、関節症など）の有無は判断できません。痛みの原因の特定には、問診・視診・触診・徒手検査などの身体評価が必要です。';
 
-  function renderCauseCard(area, d){
+  // 部位ごとの判定結果（事実A・一般的関連B）を計算する純粋な関数。
+  // 施術者向けカード（renderCauseCard）と患者向け文章（buildPatientCauseSummary）の
+  // 両方がこれを共有し、判定ロジックを二重管理しないようにする
+  function computeCauseFindings(area, d){
     const factsA = [];   // A: 客観的に確認できた身体組成の特徴（測定値そのもの）
     const mechB = [];    // B: 痛みとの関連が一般的に指摘される機序（個別の因果関係ではない）
 
@@ -2090,6 +2216,11 @@
       }
     }
 
+    return { factsA, mechB };
+  }
+
+  function renderCauseCard(area, d){
+    const { factsA, mechB } = computeCauseFindings(area, d);
     const card = document.createElement('div');
     card.className = 'cause-card';
     const sideText = {right:'（右側優位）', left:'（左側優位）', both:''}[d.side] || '';
@@ -2138,6 +2269,102 @@
     }
     return recs;
   }
+
+  /* ---------- 患者向けレポート ---------- */
+  // 施術者向けと同じ検証済みデータ・判定ロジック（computeCauseFindings/buildRecommendations）を
+  // 共有し、文章の出し分けのみを行う。ここで新たな評価や数値計算は行わない
+  function buildPatientCauseSummary(area, d){
+    const { factsA, mechB } = computeCauseFindings(area, d);
+    const sideText = {right:'（右側優位）', left:'（左側優位）', both:''}[d.side] || '';
+    const wrap = document.createElement('div');
+    wrap.className = 'pv-area';
+    let html = `<p><strong>${area}${sideText}</strong></p>`;
+    if (factsA.length === 0 && mechB.length === 0) {
+      html += `<p class="pv-intro">今回の計測データの範囲では、明確な関連要因は見つかりませんでした。</p>`;
+    } else {
+      if (factsA.length) html += `<ul>${factsA.map(t => `<li>${t}</li>`).join('')}</ul>`;
+      if (mechB.length) html += `<ul>${mechB.map(t => `<li>${t}</li>`).join('')}</ul>`;
+    }
+    wrap.innerHTML = html;
+    return wrap;
+  }
+
+  function renderPatientView(d, painAreas, recs){
+    const el = document.getElementById('patientView');
+    el.innerHTML = '';
+
+    const section = (title, bodyEl) => {
+      const s = document.createElement('div');
+      s.className = 'pv-section';
+      const h = document.createElement('h3');
+      h.textContent = title;
+      s.appendChild(h);
+      if (bodyEl instanceof Node) s.appendChild(bodyEl);
+      else s.innerHTML += bodyEl;
+      return s;
+    };
+
+    // 1. 今回の身体組成の特徴 / 2. 筋肉量と体脂肪量の現状
+    const metricLines = [];
+    if (d.weight !== null) metricLines.push(`体重: ${d.weight} kg`);
+    if (d.bmi !== null && d.evalBMI) metricLines.push(`BMI: ${d.bmi}（${d.evalBMI.text}）`);
+    if (d.pbf !== null && d.evalPBF) metricLines.push(`体脂肪率: ${d.pbf}%（${d.evalPBF.text}）`);
+    if (d.smm !== null && d.evalSMM) metricLines.push(`筋肉量バランス: ${d.evalSMM.text}`);
+    if (d.visceral !== null && d.evalVisceral) metricLines.push(`内臓脂肪レベル: ${d.visceral}（${d.evalVisceral.text}）`);
+    const metricsHtml = metricLines.length
+      ? `<ul>${metricLines.map(t => `<li>${t}</li>`).join('')}</ul>`
+      : `<p class="pv-intro">計測値が入力されていません。</p>`;
+    el.appendChild(section('今回の身体組成の特徴', metricsHtml));
+
+    // 3. 痛みとの関連が考えられる要因
+    const causeSection = document.createElement('div');
+    if (painAreas.length === 0) {
+      causeSection.innerHTML = '<p class="pv-intro">痛みの部位が選択されていません。</p>';
+    } else {
+      painAreas.forEach(area => causeSection.appendChild(buildPatientCauseSummary(area, d)));
+    }
+    el.appendChild(section('痛みとの関連が考えられる要因（参考情報です）', causeSection));
+
+    // 4. 現時点で確認できていないこと
+    el.appendChild(section('現時点で確認できていないこと',
+      `<p>${UNKNOWN_DISCLAIMER}</p>`));
+
+    // 5. 追加で確認したい身体機能
+    const cSet = new Set();
+    painAreas.forEach(area => (ADDITIONAL_ASSESSMENT_ITEMS[area] || []).forEach(c => cSet.add(c)));
+    const cHtml = cSet.size
+      ? `<ul>${Array.from(cSet).map(c => `<li>${c}</li>`).join('')}</ul>`
+      : '<p class="pv-intro">特にありません。</p>';
+    el.appendChild(section('追加で確認したい身体機能', cHtml));
+
+    // 6. 今後の身体管理の方向性
+    el.appendChild(section('今後の身体管理の方向性', `<ul>${recs.map(r => `<li>${r}</li>`).join('')}</ul>`));
+
+    // 7. 次回測定で確認する数値
+    el.appendChild(section('次回測定で確認する数値',
+      '<p>体重・BMI・体脂肪率・骨格筋量・内臓脂肪レベルの推移を確認します。</p>'));
+  }
+
+  /* ---------- 施術者向け / 患者向け 表示切り替え・印刷 ---------- */
+  const viewPractitionerBtn = document.getElementById('viewPractitionerBtn');
+  const viewPatientBtn = document.getElementById('viewPatientBtn');
+  const practitionerView = document.getElementById('practitionerView');
+  const patientView = document.getElementById('patientView');
+  const printBtn = document.getElementById('printBtn');
+
+  viewPractitionerBtn.addEventListener('click', () => {
+    practitionerView.style.display = 'block';
+    patientView.style.display = 'none';
+    viewPractitionerBtn.classList.add('active');
+    viewPatientBtn.classList.remove('active');
+  });
+  viewPatientBtn.addEventListener('click', () => {
+    practitionerView.style.display = 'none';
+    patientView.style.display = 'block';
+    viewPatientBtn.classList.add('active');
+    viewPractitionerBtn.classList.remove('active');
+  });
+  printBtn.addEventListener('click', () => { window.print(); });
 
 })();
 </script>
