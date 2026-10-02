@@ -772,6 +772,10 @@
 
       <div id="balanceWrap"></div>
 
+      <div id="consistencyWrap"></div>
+
+      <div id="comparisonWrap"></div>
+
       <h3 style="margin-top:24px;font-size:.95rem;">問診内容</h3>
       <div id="intakeWrap"></div>
 
@@ -1982,6 +1986,36 @@
     return v === '' ? null : parseFloat(v);
   }
 
+  // 数値の整合性検証: 入力された値と、他の数値から計算した値を比較する。
+  // 一致しない場合でもどちらかを自動的に正しいとはみなさず、「要確認」として提示するだけに留める
+  function checkConsistency(height, weight, bmi, pbf, fatmass){
+    const checks = [];
+    if (height !== null && weight !== null && bmi !== null && height > 0) {
+      const calculated = weight / Math.pow(height / 100, 2);
+      const diff = calculated - bmi;
+      checks.push({
+        label: 'BMI（身長・体重からの計算値と比較）',
+        inputValue: bmi.toFixed(1),
+        calculatedValue: calculated.toFixed(1),
+        diffText: (diff >= 0 ? '+' : '') + diff.toFixed(1),
+        consistent: Math.abs(diff) <= 0.5
+      });
+    }
+    if (weight !== null && pbf !== null && fatmass !== null) {
+      const calculated = weight * pbf / 100;
+      const diff = calculated - fatmass;
+      const tolerance = Math.max(1.0, calculated * 0.05);
+      checks.push({
+        label: '体脂肪量（体重×体脂肪率からの計算値と比較）',
+        inputValue: fatmass.toFixed(1) + ' kg',
+        calculatedValue: calculated.toFixed(1) + ' kg',
+        diffText: (diff >= 0 ? '+' : '') + diff.toFixed(1) + ' kg',
+        consistent: Math.abs(diff) <= tolerance
+      });
+    }
+    return checks;
+  }
+
   function evalBMI(bmi){
     if (bmi === null) return null;
     if (bmi < 18.5) return {level:'caution', text:'低体重（やせ）'};
@@ -2118,6 +2152,26 @@
       tbody.appendChild(tr);
     });
 
+    // ---- 数値の整合性チェック ----
+    // 計算値と入力値が食い違う場合、どちらかを勝手に採用せず不一致として表示するだけに留める
+    const consistencyWrap = document.getElementById('consistencyWrap');
+    const consistencyChecks = checkConsistency(height, weight, bmi, pbf, fatmass);
+    if (consistencyChecks.length > 0) {
+      const rows = consistencyChecks.map(c => `<tr>
+        <td>${c.label}</td><td>${c.inputValue}</td><td>${c.calculatedValue}</td><td>${c.diffText}</td>
+        <td><span class="tag ${c.consistent ? 'safe' : 'caution'}">${c.consistent ? '一致' : '要確認'}</span></td>
+      </tr>`).join('');
+      consistencyWrap.innerHTML = `
+        <h3 style="margin-top:24px;font-size:.95rem;">数値の整合性チェック</h3>
+        <p class="desc">入力された数値と、他の数値から計算した値を比較しています。「要確認」の場合、帳票の読み取り誤りや入力ミスの可能性があるため、元の画像と見比べてご確認ください（自動では修正しません）。</p>
+        <div class="table-scroll"><table id="consistencyTable">
+          <thead><tr><th>項目</th><th>入力値</th><th>計算値</th><th>差</th><th>判定</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`;
+    } else {
+      consistencyWrap.innerHTML = '';
+    }
+
     // ---- risk badge ----
     const badgeWrap = document.getElementById('riskBadgeWrap');
     const badgeText = {
@@ -2191,6 +2245,9 @@
       }),
       painAreas, recs
     );
+
+    // ---- 過去の測定結果との比較（患者名が入力済みで、過去の記録がある場合のみ。IndexedDB読み込みのため非同期） ----
+    renderComparison(patientNameInput.value.trim(), { weight, bmi, pbf, smm, visceral });
 
     document.getElementById('results').style.display = 'block';
     document.getElementById('results').scrollIntoView({behavior:'smooth', block:'start'});
@@ -3077,6 +3134,42 @@
   historyWrap.addEventListener('toggle', () => {
     if (historyWrap.open) renderHistory(patientNameInput.value.trim());
   });
+
+  // 過去の測定結果との比較。前回来院時の記録が見つかった場合のみ表示する。
+  // 単日の差分だけで改善/悪化と断定しないよう、必ず注意書きを添える
+  const COMPARISON_METRICS = [
+    {key:'weight', label:'体重', unit:'kg'}, {key:'bmi', label:'BMI', unit:''},
+    {key:'pbf', label:'体脂肪率', unit:'%'}, {key:'smm', label:'骨格筋量', unit:'kg'},
+    {key:'visceral', label:'内臓脂肪レベル', unit:''}
+  ];
+  async function renderComparison(name, current){
+    const wrap = document.getElementById('comparisonWrap');
+    wrap.innerHTML = '';
+    if (!name) return; // 患者名未入力の場合は比較対象がないため何も表示しない
+    const patient = await PatientRepo.findByName(name);
+    if (!patient) return;
+    const visits = await VisitRepo.listByPatient(patient.id);
+    if (visits.length === 0) return; // 初回来院（比較対象となる過去の記録なし）
+    const previous = visits[visits.length - 1].measurement || {};
+
+    const rows = COMPARISON_METRICS.map(m => {
+      const curVal = current[m.key];
+      const prevVal = previous[m.key];
+      if (curVal === null || curVal === undefined || prevVal === null || prevVal === undefined) return null;
+      const diff = curVal - prevVal;
+      const diffText = (diff >= 0 ? '+' : '') + diff.toFixed(1) + (m.unit ? ' ' + m.unit : '');
+      return `<tr><td>${m.label}</td><td>${prevVal}${m.unit}</td><td>${curVal}${m.unit}</td><td>${diffText}</td></tr>`;
+    }).filter(Boolean);
+    if (rows.length === 0) return;
+
+    wrap.innerHTML = `
+      <h3 style="margin-top:24px;font-size:.95rem;">過去の測定結果との比較（前回: ${formatDateOnly(visits[visits.length - 1].date)}）</h3>
+      <div class="table-scroll"><table id="comparisonTable">
+        <thead><tr><th>項目</th><th>前回</th><th>今回</th><th>差</th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+      </table></div>
+      <p class="desc" style="margin-top:6px;">単日の数値だけで改善・悪化を断定しないでください。測定条件（時間帯・食事・運動の有無等）が異なると比較の信頼性が下がります。</p>`;
+  }
 
   async function renderPatientList(){
     const content = document.getElementById('patientListContent');
